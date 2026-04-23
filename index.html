@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>研究開発公募探索 β版</title>
+    <title>研究開発資金探索 β版</title>
     <style>
       :root {
         --bg: #f7f8fc;
-        --card: rgba(255,255,255,0.82);
+        --card: rgba(255,255,255,0.84);
         --line: #e5e7f0;
         --text: #1e2746;
         --muted: #66708b;
@@ -16,7 +16,11 @@
         --accent: #edf0ff;
         --shadow: 0 18px 50px rgba(42, 52, 95, 0.10);
       }
+
       * { box-sizing: border-box; }
+
+      html { scroll-behavior: smooth; }
+
       body {
         margin: 0;
         font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -26,247 +30,330 @@
           radial-gradient(circle at top right, #f7ecff 0, transparent 22%),
           var(--bg);
       }
-      .wrap { max-width: 1160px; margin: 0 auto; padding: 28px 20px 80px; }
+
+      .wrap {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 28px 20px 80px;
+      }
+
       .pill {
-        display: inline-flex; align-items: center; gap: 8px;
-        background: #eceaff; color: #5147d9; border-radius: 999px;
-        padding: 10px 14px; font-size: 13px; font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: #eceaff;
+        color: #5147d9;
+        border-radius: 999px;
+        padding: 10px 14px;
+        font-size: 13px;
+        font-weight: 700;
       }
-      .hero {
-        display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 24px;
-        align-items: stretch; margin-top: 18px;
-      }
+
       .card {
-        background: var(--card); backdrop-filter: blur(10px);
-        border: 1px solid rgba(229,231,240,0.9); border-radius: 28px;
+        background: var(--card);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(229,231,240,0.92);
+        border-radius: 28px;
         box-shadow: var(--shadow);
       }
-      .hero-main { padding: 34px; }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 1.15fr 0.85fr;
+        gap: 24px;
+        align-items: stretch;
+        margin-top: 18px;
+      }
+
+      .hero-main {
+        padding: 36px;
+      }
+
       h1 {
-        font-size: clamp(34px, 6vw, 60px); line-height: 1.08;
-        margin: 18px 0 16px; letter-spacing: -0.03em;
+        font-size: clamp(34px, 6vw, 60px);
+        line-height: 1.08;
+        margin: 18px 0 16px;
+        letter-spacing: -0.03em;
       }
-      .lead { font-size: 18px; line-height: 1.8; color: var(--muted); margin: 0 0 24px; }
-      .hero-points {
-        display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; margin: 24px 0 28px;
+
+      .lead {
+        font-size: 18px;
+        line-height: 1.8;
+        color: var(--muted);
+        margin: 0 0 24px;
       }
-      .point {
-        padding: 16px; border-radius: 20px; background: #fff; border: 1px solid var(--line);
+
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
       }
-      .point b { display:block; margin-bottom:6px; font-size: 15px; }
-      .point span { color: var(--muted); font-size: 13px; line-height: 1.7; }
-      .cta-row { display:flex; flex-wrap: wrap; gap: 12px; }
+
       .btn {
-        appearance:none; border:0; cursor:pointer; text-decoration:none;
-        display:inline-flex; align-items:center; justify-content:center; gap:8px;
-        padding: 14px 18px; border-radius: 16px; font-weight: 800; font-size: 15px;
+        appearance: none;
+        border: 0;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 14px 18px;
+        border-radius: 16px;
+        font-weight: 800;
+        font-size: 15px;
+        transition: transform 0.18s ease, box-shadow 0.18s ease;
       }
+
+      .btn:hover {
+        transform: translateY(-1px);
+      }
+
       .btn-primary {
-        background: linear-gradient(135deg, var(--primary), var(--primary-2)); color:#fff;
+        background: linear-gradient(135deg, var(--primary), var(--primary-2));
+        color: #fff;
         box-shadow: 0 12px 24px rgba(111,99,255,0.25);
       }
-      .btn-secondary { background:#fff; color:var(--text); border:1px solid var(--line); }
-      .hero-side { padding: 26px; display:flex; flex-direction:column; gap: 16px; }
-      .mini-card { background:#fff; border:1px solid var(--line); border-radius: 22px; padding: 18px; }
-      .mini-card h3 { margin: 0 0 10px; font-size: 18px; }
-      .mini-card p, .mini-card li { color: var(--muted); line-height: 1.8; margin: 0; }
-      .mini-card ul { margin: 0; padding-left: 18px; }
-      .section { margin-top: 26px; }
-      .section-head { display:flex; align-items:flex-end; justify-content:space-between; gap: 16px; margin-bottom: 16px; }
-      .section h2 { margin: 0; font-size: 30px; letter-spacing: -0.02em; }
-      .section p.sub { margin: 8px 0 0; color: var(--muted); line-height: 1.8; }
-      .grid-3 { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; }
-      .feature, .faq-item {
-        padding: 22px; background:#fff; border:1px solid var(--line); border-radius: 24px; box-shadow: var(--shadow);
+
+      .btn-secondary {
+        background: #fff;
+        color: var(--text);
+        border: 1px solid var(--line);
       }
-      .feature .num {
-        width: 36px; height: 36px; border-radius: 12px; display:inline-flex; align-items:center; justify-content:center;
-        background: var(--accent); color:#4e45d4; font-weight: 800; margin-bottom: 14px;
-      }
-      .feature h3 { margin:0 0 8px; font-size: 19px; }
-      .feature p { margin:0; color:var(--muted); line-height:1.8; }
-      .sources {
-        display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; margin-top: 12px;
-      }
-      .source {
-        background:#fff; border:1px solid var(--line); border-radius: 18px; padding: 16px;
-        text-align:center; font-weight: 800;
-      }
-      .source small { display:block; margin-top:8px; color: var(--muted); font-weight: 600; line-height: 1.6; }
-      .beta {
-        display:grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items:stretch;
-      }
-      .beta-copy, .beta-form { padding: 28px; }
-      .beta-form form { display:grid; gap: 12px; }
-      .input, textarea {
-        width:100%; border:1px solid var(--line); background:#fff; border-radius: 16px;
-        padding: 14px 15px; font: inherit; color:var(--text);
-      }
-      textarea { min-height: 110px; resize: vertical; }
+
       .note {
-        color: var(--muted); font-size: 13px; line-height: 1.8;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.8;
       }
-      details {
-        background:#fff; border:1px solid var(--line); border-radius:18px; padding: 16px 18px;
+
+      .hero-side {
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
       }
-      details + details { margin-top: 10px; }
-      summary { cursor:pointer; font-weight: 800; }
-      footer { margin-top: 28px; color: var(--muted); font-size: 13px; line-height: 1.9; }
+
+      .mini-card {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        padding: 18px;
+      }
+
+      .mini-card h3 {
+        margin: 0 0 10px;
+        font-size: 18px;
+      }
+
+      .mini-card p,
+      .mini-card li {
+        color: var(--muted);
+        line-height: 1.8;
+        margin: 0;
+      }
+
+      .section {
+        margin-top: 28px;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+
+      .section h2 {
+        margin: 0;
+        font-size: 30px;
+        letter-spacing: -0.02em;
+      }
+
+      .section p.sub {
+        margin: 8px 0 0;
+        color: var(--muted);
+        line-height: 1.8;
+      }
+
+      .grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .feature {
+        padding: 22px;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+      }
+
+      .feature .num {
+        width: 36px;
+        height: 36px;
+        border-radius: 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--accent);
+        color: #4e45d4;
+        font-weight: 800;
+        margin-bottom: 14px;
+      }
+
+      .feature h3 {
+        margin: 0 0 8px;
+        font-size: 19px;
+      }
+
+      .feature p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.8;
+      }
+
+      .beta {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        align-items: stretch;
+      }
+
+      .beta-copy,
+      .beta-form {
+        padding: 28px;
+      }
+
+      .beta-form form {
+        display: grid;
+        gap: 12px;
+      }
+
+      .input,
+      textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        background: #fff;
+        border-radius: 16px;
+        padding: 14px 15px;
+        font: inherit;
+        color: var(--text);
+      }
+
+      textarea {
+        min-height: 110px;
+        resize: vertical;
+      }
+
+      footer {
+        margin-top: 28px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.9;
+      }
+
       @media (max-width: 960px) {
-        .hero, .beta, .grid-3, .sources { grid-template-columns: 1fr; }
-        .hero-points { grid-template-columns: 1fr; }
+        .hero,
+        .beta,
+        .grid-3 {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <span class="pill">限定公開β版 ・ 研究開発型スタートアップ / 中小企業向け</span>
+      <span class="pill">限定公開β版</span>
 
       <section class="hero">
         <div class="card hero-main">
-          <span class="pill">研究開発公募探索アシスタント</span>
-          <h1>研究開発資金を、<br />探しやすく、比べやすく。</h1>
+          <span class="pill">研究開発資金探索アシスタント</span>
+          <h1>研究開発資金を、<br />探しやすく。</h1>
           <p class="lead">
             Jグランツ、NEDO、JST、AMEDの公募情報を横断して、
-            研究フェーズ・分野・地域に合う候補を見つけやすくする試作版です。
-            公募要領を読む前に、候補整理・やさしい要約・比較までできます。
+            自社に近い候補を見つけやすくするβ版です。
           </p>
 
-          <div class="hero-points">
-            <div class="point">
-              <b>横断して探せる</b>
-              <span>分散している研究開発公募を、1つの画面からまとめて探索できます。</span>
-            </div>
-            <div class="point">
-              <b>やさしく読める</b>
-              <span>目的・対象・予算感・締切を先に整理して、読む負担を減らします。</span>
-            </div>
-            <div class="point">
-              <b>今はβ版です</b>
-              <span>実際に使う方の声をもとに、検索精度や見せ方を改善しています。</span>
-            </div>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="#beta">限定公開に参加する</a>
+            <a class="btn btn-secondary" href="#features">できることを見る</a>
           </div>
 
-          <div class="cta-row">
-            <a class="btn btn-primary" href="#beta">β版を試してみる</a>
-            <a class="btn btn-secondary" href="#how">できることを見る</a>
-          </div>
+          <p class="note" style="margin-top: 16px;">
+            研究開発型スタートアップ・中小企業向け
+          </p>
         </div>
 
         <aside class="card hero-side">
           <div class="mini-card">
-            <h3>こんな方に向いています</h3>
-            <ul>
-              <li>研究開発型スタートアップの経営者</li>
-              <li>中小企業の新規事業・研究開発担当</li>
-              <li>大学発シーズの事業化を進めたい方</li>
-            </ul>
+            <h3>対応ソース</h3>
+            <p>Jグランツ / NEDO / JST / AMED</p>
           </div>
           <div class="mini-card">
-            <h3>今できること</h3>
-            <p>研究フェーズや分野、地域で候補を絞り込み、やさしい要約・比較・準備確認まで行えます。</p>
+            <h3>このβ版でできること</h3>
+            <p>候補を探す、要点を読む、比較して絞る。</p>
           </div>
           <div class="mini-card">
             <h3>ご利用前に</h3>
-            <p>本サービスは情報整理・準備支援ツールです。申請可否や採択を保証するものではありません。最終確認は公式公募要領で行ってください。</p>
+            <p>本サービスは情報整理・探索・比較を支援するβ版です。最終確認は公式の公募要領・募集要項で行ってください。</p>
           </div>
         </aside>
       </section>
 
-      <section class="section" id="how">
+      <section class="section" id="features">
         <div class="section-head">
           <div>
-            <h2>このβ版でできること</h2>
-            <p class="sub">単なる検索ではなく、候補整理から読みやすい要点把握までを支援します。</p>
+            <h2>できること</h2>
+            <p class="sub">まずは「探す前のしんどさ」を減らすことに絞っています。</p>
           </div>
         </div>
+
         <div class="grid-3">
           <div class="feature">
             <div class="num">1</div>
             <h3>近い公募を探す</h3>
-            <p>研究フェーズ、技術分野、支援の性格、地域などをもとに、近い候補を上位表示します。</p>
+            <p>分野や研究フェーズに合う候補を絞り込みます。</p>
           </div>
           <div class="feature">
             <div class="num">2</div>
             <h3>要点を先に読む</h3>
-            <p>目的、対象、予算感、締切、対象経費などを先に整理して、読むコストを下げます。</p>
+            <p>目的、対象、予算、締切などを見やすく整理します。</p>
           </div>
           <div class="feature">
             <div class="num">3</div>
             <h3>比較して絞る</h3>
-            <p>似た候補の違いを見比べて、自社に近い制度を絞りやすくします。</p>
+            <p>似た公募の違いを見比べて判断しやすくします。</p>
           </div>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="section-head">
-          <div>
-            <h2>対応ソース</h2>
-            <p class="sub">研究開発型スタートアップ・中小企業が見たい入口を横断して扱います。</p>
-          </div>
-        </div>
-        <div class="sources">
-          <div class="source">Jグランツ<small>補助金・助成金の検索 / 申請基盤</small></div>
-          <div class="source">NEDO<small>産業技術・実証・事業化寄り</small></div>
-          <div class="source">JST<small>企業化・技術移転・SBIR寄りを優先</small></div>
-          <div class="source">AMED<small>医療・バイオ・ヘルスケア寄り</small></div>
         </div>
       </section>
 
       <section class="section card beta" id="beta">
         <div class="beta-copy">
           <span class="pill">限定公開に参加する</span>
-          <h2>まずは触って、率直な感想をください</h2>
+          <h2>まずは使って、感想をください</h2>
           <p class="sub">
-            まだβ版なので、実際に使う方の声をもとに改善したいです。
-            5〜10分ほど触ってもらえれば十分です。
+            まだβ版です。実際に触ってもらいながら、
+            検索精度と見せ方を改善していきたいと考えています。
           </p>
-          <div class="mini-card" style="margin-top:16px;">
-            <h3>お願いしたいこと</h3>
-            <ul>
-              <li>欲しい制度が見つかったか</li>
-              <li>ノイズが多くなかったか</li>
-              <li>「やさしく読む」が役に立ったか</li>
-              <li>また使いたいと思えるか</li>
-            </ul>
-          </div>
         </div>
+
         <div class="beta-form">
           <form>
             <input class="input" type="text" placeholder="お名前" />
             <input class="input" type="email" placeholder="メールアドレス" />
             <input class="input" type="text" placeholder="所属 / 会社名" />
-            <textarea placeholder="どんな立場で使いたいか、探したい公募のイメージがあれば教えてください"></textarea>
+            <textarea placeholder="探したい公募や、使う立場があれば教えてください"></textarea>
             <button class="btn btn-primary" type="button">限定公開に参加する</button>
           </form>
-          <p class="note">※ フォーム送信先は未接続です。実運用では Googleフォーム、Typeform、Notion Form などにつなぐ想定です。</p>
         </div>
-      </section>
-
-      <section class="section">
-        <div class="section-head">
-          <div>
-            <h2>よくある質問</h2>
-          </div>
-        </div>
-        <details>
-          <summary>誰向けのサービスですか？</summary>
-          <p class="note">研究開発型スタートアップ、中小企業の新規事業・研究開発担当、大学発シーズの事業化に関わる方を主な想定ユーザーにしています。</p>
-        </details>
-        <details>
-          <summary>申請代行までしてくれますか？</summary>
-          <p class="note">いいえ。現時点では、探索・整理・比較・準備支援に特化しています。最終判断や代理提出は行いません。</p>
-        </details>
-        <details>
-          <summary>まだ無料で使えますか？</summary>
-          <p class="note">はい。β版として限定公開中です。今後の提供形態は、利用者の反応を見ながら検討します。</p>
-        </details>
       </section>
 
       <footer>
-        本サービスは情報整理・準備支援のための試作版です。<br />
-        申請可否・採択可能性を保証するものではありません。最終確認は必ず公式の公募要領・募集要項で行ってください。
+        本サービスは、公募情報の整理・探索・比較を支援するβ版です。<br />
+        申請可否の断定、採択保証、代理作成・代理提出は行いません。最終確認は必ず公式の公募要領・募集要項で行ってください。
       </footer>
     </div>
   </body>
