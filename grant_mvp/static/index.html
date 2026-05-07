@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>研究開発資金ナビ β</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<nav class="site-nav">
+  <div class="site-nav__inner">
+    <a class="site-nav__logo" href="/">
+      <span class="logo-mark">R&D</span>
+      <div class="logo-text-group">
+        <span class="logo-text">みつけろ！R&D助成金</span>
+        <span class="logo-sub">自社に合う公募を、もっと早く</span>
+      </div>
+    </a>
+    <ul class="site-nav__links">
+      <li><a href="#search">助成金を探す</a></li>
+      <li><a href="#">やさしく知る</a></li>
+      <li><a href="#">活用事例</a></li>
+      <li><a href="#">よくある質問</a></li>
+    </ul>
+    <div class="site-nav__cta">
+      <button class="button button--ghost">ログイン</button>
+      <button class="button button--primary-warm" data-lead-type="feedback">無料相談をする</button>
+    </div>
+  </div>
+</nav>
+  <header class="hero">
+    <div class="hero__copy">
+      <p class="eyebrow">NEDO / JST / AMED / Jグランツ 横断</p>
+      <h1>どの助成金が合うの？<br><span class="hero-accent">迷ったら、私に聞いてくださいね！</span></h1>
+      <p class="lead">研究開発型企業向けに、公募の検索・要点整理・専門家相談までをつなぐβ版です。</p>
+      <div class="trust-points">
+        <div class="trust-point"><span class="trust-icon">💬</span><span>かんたん質問でOK</span></div>
+        <div class="trust-point"><span class="trust-icon">🌱</span><span>初めてでも安心</span></div>
+        <div class="trust-point"><span class="trust-icon">🔔</span><span>最新情報をお届け</span></div>
+      </div>
+      <div class="hero__actions">
+        <a class="button button--primary-warm" href="#search">無料で探してみる →</a>
+        <button class="button" data-lead-type="automation_pack">自動化したい</button>
+        <button class="button" data-lead-type="expert_listing">専門家として掲載</button>
+      </div>
+    </div>
+    <aside class="hero__preview">
+      <div class="hero-character-wrap">
+        <img
+          src="images/assistant.png"
+          alt="助成金探しを案内するアシスタント"
+          class="hero-character-image"
+        />
+        <div class="hero-speech-bubble">
+          あなたに合う助成金を<br>一緒に探します
+        </div>
+      </div>
+      <div class="beta-notice">
+        <strong>β版について</strong>
+        申請可否・採択可能性は保証しません。最終確認は公式要領や専門家にてお願いします。
+      </div>
+    </aside>
+  </header>
+
+  <main>
+    <section id="search" class="card chat-card">
+      <div class="chat-header">
+        <div>
+          <h2>公募を探す</h2>
+          <p class="chat-progress" id="chatProgress">ステップ 1 / 4</p>
+        </div>
+        <button class="button button--small" id="showWatchlist">ウォッチリストを見る</button>
+      </div>
+      <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
+      <div id="chatInput" class="chat-input-row" hidden>
+        <input id="chatTextInput" type="text" class="chat-text-input" placeholder="自由に入力..." autocomplete="off" />
+        <button id="chatSendBtn" type="button" class="button button--primary chat-send-btn">送信</button>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div>
+        <div class="section-title compact">
+          <h2>あなたにおすすめの助成金・補助金</h2>
+          <p id="resultMeta">条件を入力して検索してください。</p>
+        </div>
+        <div id="results" class="result-list"></div>
+      </div>
+      <aside class="side-panel">
+        <div class="side-feature-card side-feature-card--mint">
+          <div class="side-feature-card__eyebrow">AI 要点整理</div>
+          <h3 class="side-feature-card__title">やさしく読む</h3>
+          <p class="side-feature-card__desc">
+            難しい公募要件をAIが要点整理します。
+            結果カードの「やさしく読む」ボタンで確認できます。
+          </p>
+        </div>
+        <div class="side-feature-card side-feature-card--warm">
+          <div class="side-feature-card__eyebrow">はじめての方へ</div>
+          <h3 class="side-feature-card__title">3ステップで探せます</h3>
+          <ol class="side-steps">
+            <li>チャットで業種・フェーズを入力</li>
+            <li>一覧から気になる公募をウォッチ保存</li>
+            <li>専門家に相談して申請をサポート</li>
+          </ol>
+          <button class="button button--small button--primary-warm"
+                  data-lead-type="feedback">無料相談をする →</button>
+        </div>
+        <div class="side-actions">
+          <button class="button button--small" id="runCompare">比較する</button>
+          <button class="button button--small" id="runReadiness">準備チェック</button>
+          <button class="button button--small" data-lead-type="automation_pack">自動化相談</button>
+          <button class="button button--small" data-lead-type="expert_listing">専門家掲載</button>
+        </div>
+        <div id="sideOutput" class="side-output"></div>
+      </aside>
+    </section>
+  </main>
+
+  <section class="trust-banner">
+    <div class="trust-banner__inner">
+      <div class="trust-stat">
+        <div class="trust-stat__num">横断</div>
+        <div class="trust-stat__label">主要公募ソースを横断</div>
+      </div>
+      <div class="trust-divider"></div>
+      <div class="trust-stat">
+        <div class="trust-stat__num">定期</div>
+        <div class="trust-stat__label">公募情報を定期更新</div>
+      </div>
+      <div class="trust-divider"></div>
+      <div class="trust-stat">
+        <div class="trust-stat__num">β版</div>
+        <div class="trust-stat__label">β版ユーザー募集中</div>
+      </div>
+      <div class="trust-divider"></div>
+      <div class="trust-stat">
+        <div class="trust-stat__icon">🆓</div>
+        <div class="trust-stat__label">会員登録無料</div>
+      </div>
+      <div class="trust-divider"></div>
+      <div class="trust-stat">
+        <div class="trust-stat__icon">🔧</div>
+        <div class="trust-stat__label">β版として改善中</div>
+      </div>
+    </div>
+  </section>
+
+  <dialog id="leadDialog">
+    <form method="dialog" class="dialog-form" id="leadForm">
+      <button type="button" class="dialog-close" aria-label="閉じる" data-dialog-close>×</button>
+      <h2 id="leadTitle">お問い合わせ</h2>
+      <p id="leadDescription">β版のため、送信内容をもとに個別確認します。</p>
+      <input type="hidden" name="lead_type" />
+      <input type="hidden" name="grant_id" />
+      <input type="hidden" name="grant_title" />
+      <label>お名前<input name="name" required /></label>
+      <label>会社名<input name="company" /></label>
+      <label>メールアドレス<input name="email" type="email" required /></label>
+      <label>役割・肩書き<input name="role" placeholder="例：代表、研究開発責任者、中小企業診断士" /></label>
+      <label>相談内容<textarea name="message" rows="5" placeholder="探している公募、申請で困っていること、掲載希望内容など"></textarea></label>
+      <div class="form-actions">
+        <button class="button button--primary" value="submit" type="submit">送信する</button>
+        <button type="button" class="button" data-dialog-close>キャンセル</button>
+      </div>
+      <p class="form-note" id="leadStatus"></p>
+    </form>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>

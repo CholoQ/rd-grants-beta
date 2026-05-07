@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtualenv
+.venv/
+venv/
+
+# OS
+.DS_Store
+
+# DB / data (大容量・ローカル生成物)
+grant_mvp/grants.db
+grant_mvp/grants.db-journal
+grant_mvp/grants.db-wal
+grant_mvp/grants.db-shm
+
+# SNS auto-post (今回未使用)
+posts.csv
+
+# 作業用素材（公開アプリでは grant_mvp/static/images/ 配下のみ使用）
+/images/
+
+# IDE
+.vscode/
+.idea/
