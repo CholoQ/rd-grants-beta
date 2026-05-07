@@ -309,7 +309,7 @@ site_url, source_url, body_hash, generation_method, status
 
 | 変数 | 既定値 | 用途 |
 |------|-------|------|
-| `GRANT_MVP_SITE_URL` | `https://example.com/` | 投稿に挿入するサイトURL（**本番URL未定・差し替え必要**） |
+| `GRANT_MVP_SITE_URL` | `https://example.com/` | 投稿に挿入するサイトURL。**本番では必ず `GRANT_MVP_SITE_URL=https://rd-grants-beta.onrender.com/` を設定する**（Render Environment Variable に設定済み） |
 | `GRANT_MVP_POSTS_CSV` | `<root>/posts.csv` | CSVパス上書き |
 | `GRANT_MVP_DEADLINE_NEAR_DAYS` | 14 | 締切間近の閾値 |
 | `GRANT_MVP_COOLDOWN_DAYS` | 30 | (grant_id, sns) のクールダウン |
@@ -361,7 +361,7 @@ site_url, source_url, body_hash, generation_method, status
 
 ### 既知の制限
 
-- `SITE_URL` が仮値 `https://example.com/`。本番URL確定後に環境変数または `__init__.py` で差し替え必要
+- `SITE_URL` のデフォルト値はコード上 `https://example.com/`。本番では Render の環境変数 `GRANT_MVP_SITE_URL=https://rd-grants-beta.onrender.com/` で上書きする運用（コード変更は不要）。ローカル `posts.csv` は 2026-05-07 に本番URLへ置換済み
 - 異なる公募間で `subsidy_catch_phrase` が同一の場合（NEDOの定型文など）、X用テンプレが衝突して `skipped_duplicate` が発生することがある（cooldown/recent で実質的に抑制されている）
 - `today` は `last_synced_at` の直近24h内で抽出する仕様（filters.py 実装済み）。現状DBに該当レコードがなく `find_today() = 0件`。閾値を48h化するか、別定義（前日 sync_events を使う等）にするかは未決
 - S4 の仮置きキーワード（POC/IP/STARTUP/SME）は精度未検証。後で `target_number_of_employees` や target_conditions 系カラムも参照候補
@@ -399,6 +399,7 @@ site_url, source_url, body_hash, generation_method, status
 4. Environment Variables:
    - `GRANT_MVP_DB_PATH=grant_mvp/grants.snapshot.db`
    - `AUTO_REFRESH_ON_START=0`
+   - `GRANT_MVP_SITE_URL=https://rd-grants-beta.onrender.com/`（SNS投稿候補生成のサイトURL上書き用。設定しない場合は `https://example.com/` のままになるため必須）
    - （任意）`GEMINI_API_KEY=...`、`LOG_LEVEL=INFO`
 5. Deploy 実行
 6. `https://<service>.onrender.com/api/health` で `{"ok": true, ...}` 確認
