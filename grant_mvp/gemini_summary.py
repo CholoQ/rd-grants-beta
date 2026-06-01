@@ -34,6 +34,7 @@ GEMINI_SUMMARY_SCHEMA: Dict[str, Any] = {
                 "type": "string",
                 "enum": [
                     "ai",
+                    "medical",
                     "bio",
                     "healthcare",
                     "agri",
@@ -140,9 +141,13 @@ def _clean_list(value: Any, *, max_items: int = 6, max_len: int = 60) -> List[st
 
     out: List[str] = []
     seen: set[str] = set()
+    vague_terms = [
+        "公募要領に記載", "書類一式", "公式公募要領で確認", "公式要領で確認",
+        "詳細は公式", "要確認のみ",
+    ]
     for item in raw_items:
         text = _clean_text(item, fallback="", max_len=max_len)
-        if not text or text in seen:
+        if not text or text in seen or any(term in text for term in vague_terms):
             continue
         seen.add(text)
         out.append(text)
@@ -184,6 +189,11 @@ def build_gemini_summary_prompt(source_text: str, title: str = "") -> str:
 - preparation_tasks には、応募前に準備すべき実務タスクを入れる
 - expert_type_needed には、相談すべき専門家タイプを入れる
 - first_questions_to_ask には、専門家や社内で最初に確認すべき質問を入れる
+- required_documents には、資料本文に出ている書類名を具体的に入れる
+- required_documents で「公募要領に記載の書類一式」「必要書類一式」「公式サイトを確認」のような抽象表現は禁止
+- required_documents が本文から明確に読めない場合も、申請書、事業計画書、経費明細、会社概要、決算書、見積書、GビズIDなど実務上確認すべき書類候補に分解する
+- cautions には「公式要領で確認」だけでなく、何を確認するのかを具体的に入れる
+- first_questions_to_ask には、対象地域、対象経費、事前着手、締切、必要書類など具体的な質問にする
 - overview と purpose は120文字以内の短文にする。制度の本質が伝わる内容を残す
 - 各リスト項目は60文字以内の体言止めで書く
 - 難しい行政用語は避け、初めて補助金を読む人にも伝わる言葉を選ぶ

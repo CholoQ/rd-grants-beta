@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import json
+import re
+import shutil
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from typing import Any, Dict, List, Optional, Tuple
 
 from .config import (
-    ANTHROPIC_API_KEY, AUTO_REFRESH_ON_START, DB_PATH, GEMINI_API_KEY, GRANTS_SCHEMA,
+    ANTHROPIC_API_KEY, AUTO_REFRESH_MAX_AGE_HOURS, AUTO_REFRESH_ON_START, DB_PATH, GEMINI_API_KEY, GRANTS_SCHEMA,
     LEGAL_DISCLAIMER, OPENAI_API_KEY, SYNC_EVENTS_SCHEMA, LEADS_SCHEMA, GRANT_SUMMARIES_SCHEMA, FAST_MODE_DEFAULT,
-    ENABLE_LIVE_FETCH_IN_FAST_MODE, ENABLE_LLM_PROFILE_IN_FAST_MODE, ENABLE_LLM_RERANK_IN_FAST_MODE
+    ENABLE_LIVE_FETCH_IN_FAST_MODE, ENABLE_LLM_PROFILE_IN_FAST_MODE, ENABLE_LLM_RERANK_IN_FAST_MODE, SNAPSHOT_DB_PATH,
 )
 from .utils import strip_html, utcnow
+from .status_utils import effective_status
 
 LIVE_ITEM_CACHE: Dict[str, Dict[str, Any]] = {}
 
@@ -30,6 +33,9 @@ def db() -> sqlite3.Connection:
 
 
 def init_db() -> None:
+    if not DB_PATH.exists() and SNAPSHOT_DB_PATH.exists():
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(SNAPSHOT_DB_PATH, DB_PATH)
     conn = db()
     with conn:
         conn.execute(GRANTS_SCHEMA)
@@ -49,10 +55,21 @@ def safe_public_url(url: Optional[str]) -> Optional[str]:
     return url
 
 
+def preferred_public_url(item: Dict[str, Any]) -> Optional[str]:
+    text = f"{item.get('detail') or ''} {item.get('subsidy_catch_phrase') or ''}"
+    urls = re.findall(r"https?://[^\s\"'<>]+", text)
+    for url in urls:
+        cleaned = url.rstrip("。、）,)")
+        if "jgrants-portal.go.jp" not in cleaned and safe_public_url(cleaned):
+            return cleaned
+    return safe_public_url(item.get("front_subsidy_detail_page_url"))
+
+
 def prepare_item(item: Dict[str, Any]) -> Dict[str, Any]:
     item = dict(item)
     item["detail_plain"] = strip_html(item.get("detail") or item.get("subsidy_catch_phrase") or "")
-    item["safe_public_url"] = safe_public_url(item.get("front_subsidy_detail_page_url"))
+    item["safe_public_url"] = preferred_public_url(item)
+    item["status"] = effective_status(item)
     return item
 
 def get_grant_summary_cache(grant_id: str, source_text_hash: str) -> Optional[Dict[str, Any]]:
@@ -375,8 +392,16 @@ def bootstrap_data() -> None:
     init_db()
     conn = db()
     total = conn.execute("SELECT COUNT(*) FROM grants WHERE source LIKE 'jgrants%'").fetchone()[0]
+    latest = conn.execute("SELECT MAX(last_synced_at) FROM grants WHERE source LIKE 'jgrants%'").fetchone()[0]
     conn.close()
-    if AUTO_REFRESH_ON_START and total == 0:
+    is_stale = True
+    if latest:
+        try:
+            latest_dt = datetime.fromisoformat(str(latest).replace("Z", "+00:00"))
+            is_stale = datetime.now(timezone.utc) - latest_dt > timedelta(hours=AUTO_REFRESH_MAX_AGE_HOURS)
+        except ValueError:
+            is_stale = True
+    if AUTO_REFRESH_ON_START and (total == 0 or is_stale):
         refresh_data()
 
 

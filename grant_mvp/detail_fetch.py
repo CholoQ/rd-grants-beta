@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import io
+import json
 import re
 from functools import lru_cache
 from typing import Dict, List, Optional
@@ -142,6 +144,47 @@ def _fetch_pdf_text(url: str) -> str:
     text = '\n'.join(texts)
     text = re.sub(r'\s+', ' ', text).strip()
     return text[:MAX_PDF_CHARS]
+
+
+def extract_embedded_guideline_pdf(item: Dict[str, object]) -> Dict[str, object]:
+    out: Dict[str, object] = {"pdf_text": "", "pdf_name": None, "note": None}
+    if PdfReader is None:
+        out["note"] = "PDF本文の抽出ライブラリがありません"
+        return out
+    raw = item.get("raw_json") if item else None
+    if not raw:
+        return out
+    try:
+        payload = json.loads(str(raw))
+    except json.JSONDecodeError:
+        return out
+    guidelines = payload.get("application_guidelines")
+    if not isinstance(guidelines, list):
+        return out
+    for guideline in guidelines:
+        if not isinstance(guideline, dict) or not guideline.get("data"):
+            continue
+        try:
+            body = base64.b64decode(str(guideline["data"]), validate=False)
+            reader = PdfReader(io.BytesIO(body))
+        except Exception as exc:
+            logger.info("embedded guideline pdf read failed: %s", exc)
+            continue
+        texts: List[str] = []
+        for page in reader.pages[:MAX_PDF_PAGES]:
+            try:
+                txt = page.extract_text() or ""
+            except Exception:
+                txt = ""
+            if txt:
+                texts.append(txt)
+        text = re.sub(r"\s+", " ", "\n".join(texts)).strip()
+        if text:
+            out["pdf_text"] = text[:MAX_PDF_CHARS]
+            out["pdf_name"] = guideline.get("name")
+            out["note"] = "Jグランツ添付の公募要領PDF本文を取得しました"
+            return out
+    return out
 
 
 def merged_source_text(item: Dict[str, object], bundle: Dict[str, object]) -> str:

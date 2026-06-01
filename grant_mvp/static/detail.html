@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>応募判断詳細｜りこナビ β</title>
+  <link rel="stylesheet" href="/style.css?v=20260531-url-auto" />
+</head>
+<body>
+<nav class="site-nav">
+  <div class="site-nav__inner">
+    <a class="site-nav__logo" href="/">
+      <span class="logo-mark">りこ</span>
+      <div class="logo-text-group">
+        <span class="logo-text">りこナビ</span>
+        <span class="logo-sub">研究資金を、いっしょに探して見極める</span>
+      </div>
+    </a>
+    <ul class="site-nav__links">
+      <li><a href="/#search">助成金を探す</a></li>
+      <li><a href="#">やさしく知る</a></li>
+      <li><a href="#">活用事例</a></li>
+      <li><a href="#">よくある質問</a></li>
+    </ul>
+    <div class="site-nav__cta">
+      <a class="button button--ghost" href="/#search">← 一覧へ戻る</a>
+      <button class="button button--primary-warm" data-lead-type="feedback">無料相談をする</button>
+    </div>
+  </div>
+</nav>
+
+<main class="detail-main">
+  <div class="detail-disclaimer detail-disclaimer--top">
+    <strong>本ページについて（ご一読ください）</strong>
+    <p>
+      本ページの情報は、各補助金・助成金・公募情報をもとに作成した参考情報です。
+      応募可否、対象経費、申請条件、締切等の最終確認は、公式サイト・公募要領をご確認ください。
+      本サイトは採択や補助金の受給を保証するものではありません。
+      また、本サイトは個別の士業・専門家を紹介または斡旋するものではありません。
+    </p>
+  </div>
+
+  <section class="detail-head card" id="detailHead">
+    <p class="eyebrow" id="detailEyebrow">読み込み中...</p>
+    <h1 id="detailTitle">公募情報を取得しています</h1>
+    <p class="lead" id="detailCatch"></p>
+    <div class="detail-facts" id="detailFacts"></div>
+    <p class="detail-source-note" id="detailSourceNote"></p>
+    <div class="detail-head-actions">
+      <a class="button button--primary-warm" id="detailOfficialBtn" href="#" rel="noopener" hidden>公式サイトで確認する →</a>
+      <button class="button" data-lead-type="consultation" id="detailConsultBtn">専門家への相談を検討する</button>
+      <a class="button button--primary-warm" id="detailCheckBtn" href="/check.html">応募前チェックを始める</a>
+    </div>
+  </section>
+
+  <section class="detail-loading card" id="detailLoading" aria-live="polite">
+    <div class="detail-loading__mark">りこ</div>
+    <div class="detail-loading__body">
+      <p class="detail-loading__title" id="detailLoadingTitle">りこが公募要領を読んでます</p>
+      <p class="detail-loading__text" id="detailLoadingText">対象条件、使える経費、注意点を順番に拾っています。</p>
+    </div>
+    <span class="detail-loading__dots" aria-hidden="true"></span>
+  </section>
+
+  <section class="card detail-section">
+    <div class="section-title compact">
+      <h2>判断サマリ</h2>
+      <p>応募する前に確認したい、4つの判断軸の目安です。</p>
+    </div>
+    <div class="judgement-badges judgement-badges--lg" id="detailJudgement">
+      <span class="j-badge j-badge--risk"   data-j="risk">🚫 対象外リスク：—</span>
+      <span class="j-badge j-badge--diff"   data-j="diff">🪜 申請難易度：—</span>
+      <span class="j-badge j-badge--prep"   data-j="prep">⏳ 準備期間：—</span>
+      <span class="j-badge j-badge--expert" data-j="expert">🙋 専門家相談：—</span>
+    </div>
+  </section>
+
+  <section class="card detail-section">
+    <div class="section-title compact">
+      <h2>対象外リスク</h2>
+      <p>応募の前に確認したい、対象外となる可能性のある条件です。</p>
+    </div>
+    <ul class="detail-risks" id="detailRisks"></ul>
+  </section>
+
+  <section class="card detail-section">
+    <div class="section-title compact">
+      <h2>申請難易度の理由</h2>
+      <p>書類の多さ、事前相談、共同実施などから見た準備の重さです。</p>
+    </div>
+    <ul class="detail-list" id="detailDifficultyReasons"></ul>
+  </section>
+
+  <section class="card detail-section">
+    <div class="section-title compact">
+      <h2>先に確認すべき条件</h2>
+      <p>応募資格や対象範囲について、最初に確認したい項目です。</p>
+    </div>
+    <ul class="detail-list" id="detailTargetConditions"></ul>
+  </section>
+
+  <section class="card detail-section detail-section--two">
+    <div class="detail-col">
+      <h3 class="detail-col-title">💡 使える可能性のある経費</h3>
+      <ul class="detail-list" id="detailEligibleExpenses"></ul>
+    </div>
+    <div class="detail-col">
+      <h3 class="detail-col-title">⚠️ 注意が必要な経費</h3>
+      <ul class="detail-list" id="detailIneligibleExpenses"></ul>
+    </div>
+  </section>
+
+  <section class="card detail-section">
+    <div class="section-title compact">
+      <h2>必要書類の例</h2>
+      <p>本文から読み取れるものと、申請で確認しておきたい書類候補です。</p>
+    </div>
+    <ul class="detail-list" id="detailRequiredDocuments"></ul>
+  </section>
+
+  <section class="card detail-section">
+    <div class="section-title compact">
+      <h2>次にやること</h2>
+      <p>応募準備の進め方の目安です。</p>
+    </div>
+    <ol class="detail-steps" id="detailNextActions"></ol>
+  </section>
+
+  <section class="card detail-section">
+    <div class="section-title compact">
+      <h2>相談を検討したい専門家タイプ</h2>
+      <p>あくまで一般的な職種の例示です。個別の専門家・事務所の紹介や斡旋は行いません。</p>
+    </div>
+    <ul class="detail-tags" id="detailExpertTypes"></ul>
+    <p class="detail-expert-note" id="detailExpertNote"></p>
+  </section>
+
+  <section class="card detail-cta">
+    <h2>応募する前に、判断しませんか？</h2>
+    <p>応募前チェックフォーム（近日公開予定）で、自社の応募可否を整理できます。</p>
+    <div class="detail-cta-actions">
+      <a class="button button--primary-warm" id="detailCheckBtnBottom" href="/check.html">応募前チェックを始める</a>
+      <a class="button" id="detailOfficialBtnBottom" href="#" rel="noopener" hidden>公式サイトで確認する</a>
+      <a class="button" href="/paid.html">有料診断について相談する</a>
+      <button class="button" data-lead-type="consultation">専門家への相談を検討する</button>
+    </div>
+  </section>
+
+  <div class="detail-disclaimer detail-disclaimer--bottom">
+    <p>
+      本ページの情報は、各補助金・助成金・公募情報をもとに作成した参考情報です。
+      応募可否、対象経費、申請条件、締切等の最終確認は、公式サイト・公募要領をご確認ください。
+      本サイトは採択や補助金の受給を保証するものではありません。
+      また、本サイトは個別の士業・専門家を紹介または斡旋するものではありません。
+    </p>
+  </div>
+</main>
+
+<dialog id="leadDialog">
+  <form method="dialog" class="dialog-form" id="leadForm">
+    <button type="button" class="dialog-close" aria-label="閉じる" data-dialog-close>×</button>
+    <h2 id="leadTitle">お問い合わせ</h2>
+    <p id="leadDescription">β版のため、送信内容をもとに個別確認します。</p>
+    <input type="hidden" name="lead_type" />
+    <input type="hidden" name="grant_id" />
+    <input type="hidden" name="grant_title" />
+    <label>お名前<input name="name" required /></label>
+    <label>会社名<input name="company" /></label>
+    <label>メールアドレス<input name="email" type="email" required /></label>
+    <label>役割・肩書き<input name="role" placeholder="例：代表、研究開発責任者、中小企業診断士" /></label>
+    <label>相談内容<textarea name="message" rows="5" placeholder="探している公募、申請で困っていること、掲載希望内容など"></textarea></label>
+    <div class="form-actions">
+      <button class="button button--primary" value="submit" type="submit">送信する</button>
+      <button type="button" class="button" data-dialog-close>キャンセル</button>
+    </div>
+    <p class="form-note" id="leadStatus"></p>
+  </form>
+</dialog>
+
+<script src="/detail.js?v=20260531-url-auto"></script>
+</body>
+</html>

@@ -17,6 +17,7 @@ from .config import (
 from .models import ParsedProfile
 from .profile_parser import parse_profile, _extract_openai_text
 from .repository import db, upsert_grants
+from .status_utils import effective_status
 from .utils import contains_any, strip_html, unique
 from .jgrants import JGrantsClient, ensure_live_cache_for_query
 
@@ -27,6 +28,118 @@ def build_searchable_text(item: Dict[str, Any]) -> str:
         item.get("system_name") or "", item.get("subsidy_catch_phrase") or "", item.get("target_number_of_employees") or "",
     ]
     return strip_html(" ".join(str(p) for p in parts)).lower()
+
+
+DETAIL_MATCH_STOP_MARKERS = [
+    "■応募資格", "■補助対象者", "■対象者", "■申請対象者", "■対象事業者",
+    "応募資格", "補助対象者", "対象者", "対象事業者", "対象の業種", "業種は以下",
+]
+
+
+def matching_detail_text(item: Dict[str, Any]) -> str:
+    detail = strip_html(str(item.get("detail") or ""))
+    cut_at = len(detail)
+    for marker in DETAIL_MATCH_STOP_MARKERS:
+        index = detail.find(marker)
+        if index >= 0:
+            cut_at = min(cut_at, index)
+    return detail[:cut_at]
+
+
+def build_topic_text(item: Dict[str, Any]) -> str:
+    parts = [
+        item.get("title") or "", matching_detail_text(item),
+        item.get("granttype") or "", item.get("system_name") or "", item.get("subsidy_catch_phrase") or "",
+    ]
+    return strip_html(" ".join(str(p) for p in parts)).lower()
+
+
+def build_headline_text(item: Dict[str, Any]) -> str:
+    parts = [
+        item.get("title") or "", item.get("granttype") or "", item.get("system_name") or "",
+        item.get("subsidy_catch_phrase") or "",
+    ]
+    return strip_html(" ".join(str(p) for p in parts)).lower()
+
+
+SECTOR_STRONG_MATCH_TERMS = {
+    "medical": ["医療", "医薬", "医療機器", "治療", "診断", "臨床", "病院", "患者", "画像診断"],
+    "bio": ["バイオ", "創薬", "細胞", "遺伝子", "抗体", "タンパク質", "再生医療", "ゲノム", "ライフサイエンス"],
+    "healthcare": ["ヘルスケア", "healthcare", "健康", "予防", "未病", "ウェルネス", "介護", "福祉", "睡眠", "生活習慣", "腸内環境", "腸内細菌", "腸内フローラ", "菌叢", "マイクロバイオーム", "microbiome", "gut microbiome", "健康寿命"],
+    "agri": ["農業", "農林水産", "スマート農業", "アグリ", "畜産", "作物", "栽培", "水産", "植物", "土壌", "圃場", "内生菌", "エンドファイト", "微生物", "共生"],
+    "foodtech": ["フードテック", "食品", "食料", "発酵", "代替肉", "培養肉", "機能性食品", "代替タンパク"],
+}
+
+
+SECTOR_HEADLINE_MISMATCH_TERMS = {
+    "medical": [
+        "航空機", "航空宇宙", "宇宙", "衛星", "ロケット", "自動車", "電動化", "商用車", "充電",
+        "リチウム", "蓄電池", "太陽光", "農業", "畜産", "食品", "フード", "半導体", "コンビナート",
+    ],
+    "bio": [
+        "航空機", "航空宇宙", "宇宙", "衛星", "ロケット", "自動車", "電動化", "商用車", "充電",
+        "リチウム", "蓄電池", "太陽光", "コンビナート", "zeb", "半導体",
+    ],
+    "healthcare": [
+        "航空機", "航空宇宙", "宇宙", "衛星", "ロケット", "自動車", "次世代自動車", "電動化", "商用車", "充電",
+        "リチウム", "蓄電", "蓄電池", "電池", "バッテリー", "太陽光", "パネル", "農業", "畜産", "食品",
+        "フード", "プラスチック", "バイオマス", "生分解性", "金属破砕", "半導体", "電子", "ロボット",
+        "病院", "医療dx", "医療DX", "医療機器", "創薬", "医薬", "臨床", "治療", "診断",
+    ],
+    "agri": [
+        "自動車", "電動化", "商用車", "航空機", "宇宙", "半導体", "電子", "コンビナート", "gx", "zeb",
+        "企業立地", "工場等", "工場", "倉庫", "建物", "建設", "土地", "新増設", "海外商標",
+    ],
+    "foodtech": [
+        "自動車", "電動化", "商用車", "航空機", "宇宙", "半導体", "電子", "コンビナート", "gx", "zeb",
+        "企業立地", "工場等", "工場", "倉庫", "建物", "建設", "土地", "新増設", "海外商標",
+    ],
+}
+
+
+SECTOR_MISMATCH_TERMS = {
+    "medical": [
+        "電動", "電気自動車", "ev", "商用車", "自動車", "充電", "リチウム", "蓄電池", "太陽光",
+        "省co2", "脱炭素", "gx", "再エネ", "コンビナート", "zeb", "企業立地", "工場等",
+    ],
+    "bio": [
+        "電動", "電気自動車", "ev", "商用車", "自動車", "充電", "リチウム", "蓄電池", "太陽光",
+        "省co2", "脱炭素", "gx", "再エネ", "コンビナート", "zeb", "企業立地", "工場等",
+    ],
+    "healthcare": [
+        "電動", "電気自動車", "ev", "商用車", "自動車", "充電", "リチウム", "蓄電", "蓄電池", "電池", "バッテリー",
+        "太陽光", "パネル", "省co2", "脱炭素", "gx", "カーボン", "再エネ", "省エネ", "リサイクル", "再資源",
+        "廃プラスチック", "プラスチック", "バイオマス", "生分解性", "金属破砕", "選別設備", "化石資源", "再生可能資源",
+        "病院", "医療dx", "医療DX", "医療機器", "創薬", "医薬", "臨床", "治療", "診断",
+    ],
+    "agri": [
+        "コンビナート", "zeb", "建築", "建物", "土地", "不動産", "企業立地", "工場等", "自動車", "電動化",
+        "リチウム", "蓄電池", "太陽光", "海外商標", "訴訟", "半導体", "航空機",
+    ],
+    "foodtech": [
+        "コンビナート", "zeb", "建築", "建物", "土地", "不動産", "企業立地", "工場等", "自動車", "電動化",
+        "リチウム", "蓄電池", "太陽光", "海外商標", "訴訟", "半導体", "航空機",
+    ],
+}
+
+
+GENERIC_RD_SECTOR_TERMS = ["研究開発", "技術開発", "実証", "試作", "スタートアップ", "新技術", "新製品", "イノベーション"]
+AMED_ACADEMIC_ONLY_TERMS = ["大学等", "大学、研究機関", "研究機関", "研究者", "研究代表者", "研究開発代表者", "公的研究機関"]
+ENTERPRISE_TARGET_TERMS = ["企業", "民間", "スタートアップ", "ベンチャー", "中小企業", "事業者", "法人"]
+NEGATIVE_SECTOR_TERMS = {
+    "medical": ["医療", "医療機器", "病院", "臨床", "患者", "医療dx", "医療DX", "診断", "治療"],
+    "drug_discovery": ["創薬", "医薬", "医薬品", "薬剤", "drug", "pharma"],
+}
+NEGATIVE_SECTOR_LABELS = {"medical": "医療・病院系", "drug_discovery": "創薬・医薬品系"}
+
+
+def amed_enterprise_caution(item: Dict[str, Any], searchable: str) -> Optional[str]:
+    if not str(item.get("source") or "").startswith("amed"):
+        return None
+    headline = build_headline_text(item)
+    if contains_any(f"{headline} {searchable}", AMED_ACADEMIC_ONLY_TERMS) and not contains_any(f"{headline} {searchable}", ENTERPRISE_TARGET_TERMS):
+        return "AMED公募です。企業対象の記載なし、または大学・研究機関向けの可能性があります"
+    return None
 
 
 def present_labels(searchable: str, mapping: Dict[str, List[str]]) -> List[str]:
@@ -120,10 +233,21 @@ def safe_public_url(url: Optional[str]) -> Optional[str]:
     return url
 
 
+def preferred_public_url(item: Dict[str, Any]) -> Optional[str]:
+    text = f"{item.get('detail') or ''} {item.get('subsidy_catch_phrase') or ''}"
+    urls = re.findall(r"https?://[^\s\"'<>]+", text)
+    for url in urls:
+        cleaned = url.rstrip("。、）,)")
+        if "jgrants-portal.go.jp" not in cleaned and safe_public_url(cleaned):
+            return cleaned
+    return safe_public_url(item.get("front_subsidy_detail_page_url"))
+
+
 def prepare_item(item: Dict[str, Any]) -> Dict[str, Any]:
     item = dict(item)
     item["detail_plain"] = strip_html(item.get("detail") or item.get("subsidy_catch_phrase") or "")
-    item["safe_public_url"] = safe_public_url(item.get("front_subsidy_detail_page_url"))
+    item["safe_public_url"] = preferred_public_url(item)
+    item["status"] = effective_status(item)
     scale_key, scale_label = classify_budget_scale(item.get("subsidy_max_limit"))
     item["budget_scale_key"] = scale_key
     item["budget_scale_label"] = scale_label
@@ -136,23 +260,23 @@ def component(name: str, score: int, reason: Optional[str] = None, caution: Opti
 
 
 def fit_label(percent: int) -> str:
-    if percent >= 85:
+    if percent >= 90:
         return "高"
-    if percent >= 65:
+    if percent >= 78:
         return "中"
-    if percent >= 45:
+    if percent >= 55:
         return "要確認"
     return "低"
 
 
 def explain_match_label(percent: int) -> str:
-    if percent >= 85:
-        return "かなり近い候補"
-    if percent >= 65:
-        return "比較的近い候補"
-    if percent >= 45:
-        return "要件確認が必要な候補"
-    return "一致度が低い候補"
+    if percent >= 90:
+        return "条件にかなり近い候補"
+    if percent >= 78:
+        return "候補。ただし要件確認が必要"
+    if percent >= 55:
+        return "近そうに見えるが確認点が多い候補"
+    return "条件から遠い可能性が高い候補"
 
 
 def make_public_item(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -262,10 +386,12 @@ def evaluate_region(profile: ParsedProfile, item: Dict[str, Any]) -> Tuple[Dict[
 
 def evaluate_budget(profile: ParsedProfile, item: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
     max_limit = item.get("subsidy_max_limit")
+    if isinstance(max_limit, (int, float)) and max_limit <= 0:
+        max_limit = None
     if not profile.budget_min:
         return component("予算", 60, "予算下限指定なし"), True
     if max_limit is not None and max_limit < profile.budget_min:
-        return component("予算", 0, caution="補助上限が希望予算を下回る"), False
+        return component("予算", 25, caution="補助上限が希望予算を下回る"), True
     if max_limit is None:
         return component("予算", 45, caution="補助上限が不明"), True
     return component("予算", 100, f"補助上限 {max_limit:,}円"), True
@@ -276,7 +402,7 @@ def evaluate_size(profile: ParsedProfile, item: Dict[str, Any], searchable: str)
         return component("規模", 60, "従業員数指定なし"), True
     target = item.get("target_number_of_employees") or ""
     if target and not employee_count_matches(target, profile.employee_count):
-        return component("規模", 0, caution="従業員規模の条件に合わない可能性"), False
+        return component("規模", 20, caution="従業員規模の条件に合わない可能性"), True
     score = 75
     reason = "規模条件に大きな矛盾はない"
     if profile.employee_count <= 5 and contains_any(searchable, SMALL_COMPANY_TERMS):
@@ -384,11 +510,27 @@ def evaluate_intent(profile: ParsedProfile, searchable: str) -> Dict[str, Any]:
     return component("用途", base, reason=" / ".join(unique(reasons)) or None, caution=" / ".join(unique(cautions)) or None)
 
 
-def evaluate_sector(profile: ParsedProfile, searchable: str) -> Dict[str, Any]:
+def evaluate_sector(profile: ParsedProfile, searchable: str, headline: str = "") -> Dict[str, Any]:
+    negative_hits = []
+    negative_sectors = set(getattr(profile, "negative_sectors", []) or [])
+    negative_text = f"{headline} {searchable}"
+    for sector in negative_sectors:
+        if contains_any(negative_text, NEGATIVE_SECTOR_TERMS.get(sector, [])):
+            negative_hits.append(NEGATIVE_SECTOR_LABELS.get(sector, sector))
+    if negative_hits:
+        return component("分野", 0, caution=f"除外指定に該当: {', '.join(unique(negative_hits))}")
     if not profile.sectors:
         return component("分野", 60, "分野指定なし")
     grant_sectors = set(present_labels(searchable, SECTOR_KEYWORDS))
     requested = set(profile.sectors)
+    for sector in requested:
+        headline_mismatch_terms = SECTOR_HEADLINE_MISMATCH_TERMS.get(sector, [])
+        mismatch_terms = SECTOR_MISMATCH_TERMS.get(sector, [])
+        strong_terms = SECTOR_STRONG_MATCH_TERMS.get(sector, SECTOR_KEYWORDS.get(sector, []))
+        if headline_mismatch_terms and headline and contains_any(headline, headline_mismatch_terms) and not contains_any(headline, strong_terms):
+            return component("分野", 0, caution="選択した技術分野とは別領域の公募")
+        if mismatch_terms and contains_any(searchable, mismatch_terms) and not contains_any(searchable, strong_terms):
+            return component("分野", 0, caution="選択した技術分野とは別領域の公募")
     if grant_sectors & requested:
         return component("分野", 95, reason=f"分野一致: {', '.join(sorted(grant_sectors & requested))}")
     if "space" in requested and "nuclear" in grant_sectors:
@@ -398,11 +540,11 @@ def evaluate_sector(profile: ParsedProfile, searchable: str) -> Dict[str, Any]:
     if "space" in requested and "fintech" in grant_sectors:
         return component("分野", 0, caution="宇宙ではなくフィンテック向け")
     if grant_sectors and not (grant_sectors & requested):
-        return component("分野", 10, caution=f"想定分野が異なる: {', '.join(sorted(grant_sectors))}")
-    if contains_any(searchable, MEDIA_TERMS) and requested & {"space", "deeptech", "energy", "healthcare", "agri"}:
+        return component("分野", 0, caution=f"想定分野が異なる: {', '.join(sorted(grant_sectors))}")
+    if contains_any(searchable, MEDIA_TERMS) and requested & {"space", "deeptech", "energy", "medical", "bio", "healthcare", "agri"}:
         return component("分野", 5, caution="コンテンツ産業向けで分野が遠い")
-    if contains_any(searchable, ["先端技術", "研究開発", "スタートアップ"]):
-        return component("分野", 68, reason="分野特化ではないが近い可能性")
+    if contains_any(searchable, GENERIC_RD_SECTOR_TERMS):
+        return component("分野", 32, caution="選択分野に特化していない汎用公募")
     return component("分野", 35, caution="分野適合が薄い")
 
 
@@ -424,7 +566,7 @@ def evaluate_attributes(profile: ParsedProfile, searchable: str) -> Dict[str, An
 
 
 def evaluate_status(item: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
-    status = item.get("status")
+    status = effective_status(item)
     if status == "open":
         return component("募集状況", 100, "現在募集中"), True
     if status == "upcoming":
@@ -442,6 +584,8 @@ def evaluate_keyword_fit(profile: ParsedProfile, searchable: str) -> Dict[str, A
 
 def compute_fit(profile: ParsedProfile, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     searchable = build_searchable_text(item)
+    topic_text = build_topic_text(item)
+    headline_text = build_headline_text(item)
     region_component, ok_region = evaluate_region(profile, item)
     if not ok_region:
         return None
@@ -455,14 +599,14 @@ def compute_fit(profile: ParsedProfile, item: Dict[str, Any]) -> Optional[Dict[s
     if not ok_status:
         return None
 
-    intent_component = evaluate_intent(profile, searchable)
-    sector_component = evaluate_sector(profile, searchable)
+    intent_component = evaluate_intent(profile, topic_text)
+    sector_component = evaluate_sector(profile, topic_text, headline_text)
     attr_component = evaluate_attributes(profile, searchable)
     keyword_component = evaluate_keyword_fit(profile, searchable)
 
     if profile.intents and intent_component["score"] <= 20:
         return None
-    if profile.sectors and sector_component["score"] == 0:
+    if (profile.sectors or getattr(profile, "negative_sectors", None)) and sector_component["score"] == 0:
         return None
     if "ip" in profile.intents and intent_component["score"] < 40:
         return None
@@ -474,14 +618,19 @@ def compute_fit(profile: ParsedProfile, item: Dict[str, Any]) -> Optional[Dict[s
         fit_percent = min(fit_percent, 42)
     if sector_component["score"] < 25:
         fit_percent = min(fit_percent, 38)
+    if profile.sectors and sector_component["score"] < 50:
+        fit_percent = min(fit_percent, 44)
     if intent_component["score"] < 40 and sector_component["score"] < 30:
         fit_percent -= 18
     if profile.employee_count is not None and profile.employee_count <= 5 and attr_component["score"] < 40:
         fit_percent -= 8
+    enterprise_caution = amed_enterprise_caution(item, searchable)
+    if enterprise_caution:
+        fit_percent = min(fit_percent, 45)
     fit_percent = max(0, min(100, fit_percent))
 
     reasons = unique([c.get("reason") for c in components if c.get("reason")])[:6]
-    cautions = unique([c.get("caution") for c in components if c.get("caution")])[:5]
+    cautions = unique([c.get("caution") for c in components if c.get("caution")] + ([enterprise_caution] if enterprise_caution else []))[:6]
     item = prepare_item(item)
     item.update({
         "fit_percent": fit_percent,
@@ -578,6 +727,7 @@ def rank_grants(profile: ParsedProfile, query: str, *, include_closed: bool = Fa
     ranked: List[Dict[str, Any]] = []
     for row in rows:
         item = dict(row)
+        item["status"] = effective_status(item)
         if not include_closed and item.get("status") == "closed":
             continue
         scored = compute_fit(profile, item)
@@ -586,6 +736,4 @@ def rank_grants(profile: ParsedProfile, query: str, *, include_closed: bool = Fa
         if scored["fit_percent"] >= 25:
             ranked.append(scored)
     ranked.sort(key=lambda x: (x.get("fit_percent", 0), x.get("status") == "open", x.get("subsidy_max_limit") or 0), reverse=True)
-    return ranked[:10]
-
-
+    return ranked[:50]

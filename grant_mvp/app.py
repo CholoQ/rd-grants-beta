@@ -2,16 +2,17 @@
 from __future__ import annotations
 
 import json
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from .config import HOST, PORT, STATIC_DIR, logger
+from .config import ADMIN_TOKEN, HOST, PORT, STATIC_DIR, logger
 from .features import build_compare, build_grant_summary, build_readiness_check
 from .ranking import build_recommendation_response
-from .repository import bootstrap_data, create_lead, fetch_news, get_meta, list_grants, list_leads
+from .repository import bootstrap_data, create_lead, fetch_news, get_grant_by_id, get_meta, list_grants, list_leads, prepare_item
 from .jgrants import refresh_data
 from .utils import utcnow
 from .rd_scheme import build_rd_meta, build_rd_search
+from .company_profile import infer_company_profile_from_url
 
 
 class AppHandler(BaseHTTPRequestHandler):
@@ -32,6 +33,15 @@ class AppHandler(BaseHTTPRequestHandler):
             return {}
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
+    def _require_admin(self) -> bool:
+        if not ADMIN_TOKEN:
+            return True
+        token = self.headers.get("X-Admin-Token", "")
+        if token == ADMIN_TOKEN:
+            return True
+        self._json({"error": "unauthorized"}, status=401)
+        return False
+
     def do_GET(self) -> None:
         try:
             parsed = urlparse(self.path)
@@ -44,11 +54,23 @@ class AppHandler(BaseHTTPRequestHandler):
                 limit = int(params.get("limit", ["100"])[0])
                 self._json({"items": list_grants(query=query, status=status, limit=limit)})
                 return
+            if parsed.path == "/api/grant":
+                params = parse_qs(parsed.query)
+                grant_id = params.get("id", [""])[0]
+                if not grant_id:
+                    self._json({"error": "id is required"}, status=400); return
+                item = get_grant_by_id(grant_id)
+                if not item:
+                    self._json({"error": "not_found"}, status=404); return
+                self._json({"item": prepare_item(item)})
+                return
             if parsed.path == "/api/news":
                 self._json({"items": fetch_news()}); return
             if parsed.path == "/api/meta":
                 self._json(get_meta()); return
             if parsed.path == "/api/leads":
+                if not self._require_admin():
+                    return
                 params = parse_qs(parsed.query)
                 limit = int(params.get("limit", ["100"])[0])
                 lead_type = params.get("lead_type", [None])[0]
@@ -84,6 +106,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 body = self._read_body()
                 self._json(create_lead(body)); return
             if self.path == "/api/refresh":
+                if not self._require_admin():
+                    return
                 self._json(refresh_data()); return
             if self.path == '/api/compare':
                 body = self._read_body()
@@ -94,6 +118,9 @@ class AppHandler(BaseHTTPRequestHandler):
             if self.path == '/api/rd-search':
                 body = self._read_body()
                 self._json(build_rd_search(body)); return
+            if self.path == '/api/company-profile':
+                body = self._read_body()
+                self._json(infer_company_profile_from_url((body.get('url') or '').strip(), (body.get('need_text') or '').strip())); return
             self._json({"error": "Not found"}, status=404)
         except ValueError as exc:
             self._json({"error": str(exc)}, status=400)
@@ -116,12 +143,22 @@ class AppHandler(BaseHTTPRequestHandler):
             content_type = "text/css; charset=utf-8"
         elif file_path.suffix == ".js":
             content_type = "application/javascript; charset=utf-8"
+        elif file_path.suffix == ".png":
+            content_type = "image/png"
+        elif file_path.suffix in {".jpg", ".jpeg"}:
+            content_type = "image/jpeg"
+        elif file_path.suffix == ".webp":
+            content_type = "image/webp"
+        elif file_path.suffix == ".svg":
+            content_type = "image/svg+xml"
+        elif file_path.suffix == ".ico":
+            content_type = "image/x-icon"
         self._send(file_path.read_bytes(), content_type=content_type)
 
 
 def main() -> None:
     bootstrap_data()
-    server = HTTPServer((HOST, PORT), AppHandler)
+    server = ThreadingHTTPServer((HOST, PORT), AppHandler)
     logger.info("Grant MVP modular server running on http://%s:%s", HOST, PORT)
     try:
         server.serve_forever()

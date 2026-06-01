@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: riko-navi
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: APP_HOST
+        value: 0.0.0.0
+      - key: FAST_MODE_DEFAULT
+        value: "1"
+      - key: ENABLE_LLM_PROFILE_IN_FAST_MODE
+        value: "0"
+      - key: ENABLE_LIVE_FETCH_IN_FAST_MODE
+        value: "0"
+      - key: ENABLE_LLM_RERANK_IN_FAST_MODE
+        value: "0"
+      - key: AUTO_REFRESH_ON_START
+        value: "0"
+      - key: AUTO_REFRESH_MAX_AGE_HOURS
+        value: "24"
+      - key: JGRANTS_REQUEST_TIMEOUT
+        value: "20"
+      - key: JGRANTS_MAX_ITEMS
+        value: "180"
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false

@@ -50,6 +50,31 @@ http://127.0.0.1:8000
 deactivate
 ```
 
+## 2.5. Web公開
+
+最短の公開先は Render です。このリポジトリには `render.yaml` を入れているので、GitHubにpushしてRenderでBlueprintとして読み込むと、次の設定で起動できます。
+
+- Build Command: `pip install -r requirements.txt`
+- Start Command: `python server.py`
+- Health Check Path: `/api/health`
+- Host: `0.0.0.0`
+- Port: Renderが設定する `PORT` を自動利用
+
+公開時に設定する環境変数の目安です。
+
+```text
+GEMINI_API_KEY=...
+ADMIN_TOKEN=任意の長い文字列
+AUTO_REFRESH_ON_START=0
+FAST_MODE_DEFAULT=1
+```
+
+`ADMIN_TOKEN` を設定すると、`/api/leads` と `/api/refresh` は `X-Admin-Token` ヘッダーなしでは見られません。公開環境では必ず設定してください。
+
+初回公開は同梱の `grant_mvp/grants.snapshot.db` を使って起動します。最新データに更新したい場合は、管理者だけが `POST /api/refresh` を実行してください。
+
+Dockerで公開する場合は、同梱の `Dockerfile` を使えます。
+
 ## 3. APIキー設定
 
 LLM要約・再ランキングを使う場合は、起動前にAPIキーを設定します。未設定でも、ルールベースの検索・表示は動きます。
@@ -92,6 +117,7 @@ export APP_HOST="127.0.0.1"
 export APP_PORT="8000"
 export JGRANTS_BASE_URL="https://api.jgrants-portal.go.jp/exp"
 export AUTO_REFRESH_ON_START="1"
+export AUTO_REFRESH_MAX_AGE_HOURS="24"
 export JGRANTS_REQUEST_TIMEOUT="20"
 export JGRANTS_MAX_ITEMS="180"
 ```
@@ -105,7 +131,7 @@ export ENABLE_LIVE_FETCH_IN_FAST_MODE="0"
 export ENABLE_LLM_RERANK_IN_FAST_MODE="0"
 ```
 
-初期検証では高速モードのままで問題ありません。検索時に毎回外部取得やLLM再ランキングを行うと、表示速度が落ちます。
+初期検証では高速モードのままで問題ありません。起動時の定期更新で最新化し、通常検索はキャッシュを使うと表示が速くなります。検索時にライブ取得を行うと最新候補を拾いやすくなりますが、表示速度は落ちます。
 
 ## 5. 主な画面機能
 
@@ -349,4 +375,3 @@ Gemini APIキーが未設定、または要約に失敗した場合は、既存�
 export GEMINI_API_KEY="..."
 export GEMINI_MODEL="gemini-2.5-flash"
 ```
-

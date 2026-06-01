@@ -15,6 +15,7 @@ class ParsedProfile:
     entity_type: Optional[str] = None
     keywords: List[str] = field(default_factory=list)
     sectors: List[str] = field(default_factory=list)
+    negative_sectors: List[str] = field(default_factory=list)
     budget_min: Optional[int] = None
     is_startup: bool = False
     university_origin: bool = False

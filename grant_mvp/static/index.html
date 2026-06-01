@@ -3,45 +3,29 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>研究開発資金ナビ β</title>
-  <link rel="stylesheet" href="/style.css" />
+  <title>りこナビ β｜研究資金を、いっしょに探して見極める</title>
+  <link rel="stylesheet" href="/style.css?v=20260531-url-auto" />
 </head>
 <body>
 <nav class="site-nav">
   <div class="site-nav__inner">
     <a class="site-nav__logo" href="/">
-      <span class="logo-mark">R&D</span>
+      <span class="logo-mark">りこ</span>
       <div class="logo-text-group">
-        <span class="logo-text">みつけろ！R&D助成金</span>
-        <span class="logo-sub">自社に合う公募を、もっと早く</span>
+        <span class="logo-text">りこナビ</span>
+        <span class="logo-sub">研究資金を、いっしょに探して見極める</span>
       </div>
     </a>
-    <ul class="site-nav__links">
-      <li><a href="#search">助成金を探す</a></li>
-      <li><a href="#">やさしく知る</a></li>
-      <li><a href="#">活用事例</a></li>
-      <li><a href="#">よくある質問</a></li>
-    </ul>
-    <div class="site-nav__cta">
-      <button class="button button--ghost">ログイン</button>
-      <button class="button button--primary-warm" data-lead-type="feedback">無料相談をする</button>
-    </div>
+    <div class="site-nav__spacer"></div>
+    <a class="button button--small button--ghost" href="#search">相談する</a>
   </div>
 </nav>
   <header class="hero">
     <div class="hero__copy">
-      <p class="eyebrow">NEDO / JST / AMED / Jグランツ 横断</p>
-      <h1>どの助成金が合うの？<br><span class="hero-accent">迷ったら、私に聞いてくださいね！</span></h1>
-      <p class="lead">研究開発型企業向けに、公募の検索・要点整理・専門家相談までをつなぐβ版です。</p>
-      <div class="trust-points">
-        <div class="trust-point"><span class="trust-icon">💬</span><span>かんたん質問でOK</span></div>
-        <div class="trust-point"><span class="trust-icon">🌱</span><span>初めてでも安心</span></div>
-        <div class="trust-point"><span class="trust-icon">🔔</span><span>最新情報をお届け</span></div>
-      </div>
+      <h1>りこナビ</h1>
+      <p class="lead">気になるテーマを教えてください。近い公募を一緒に見ます。</p>
       <div class="hero__actions">
-        <a class="button button--primary-warm" href="#search">無料で探してみる →</a>
-        <button class="button" data-lead-type="automation_pack">自動化したい</button>
-        <button class="button" data-lead-type="expert_listing">専門家として掲載</button>
+        <a class="button button--primary-warm" href="#search">りこに相談する</a>
       </div>
     </div>
     <aside class="hero__preview">
@@ -52,12 +36,8 @@
           class="hero-character-image"
         />
         <div class="hero-speech-bubble">
-          あなたに合う助成金を<br>一緒に探します
+          まずは今の段階からで大丈夫。
         </div>
-      </div>
-      <div class="beta-notice">
-        <strong>β版について</strong>
-        申請可否・採択可能性は保証しません。最終確認は公式要領や専門家にてお願いします。
       </div>
     </aside>
   </header>
@@ -66,13 +46,21 @@
     <section id="search" class="card chat-card">
       <div class="chat-header">
         <div>
-          <h2>公募を探す</h2>
-          <p class="chat-progress" id="chatProgress">ステップ 1 / 4</p>
+          <h2>りこに相談</h2>
+          <p class="chat-progress" id="chatProgress">ステップ 1 / 5</p>
         </div>
         <button class="button button--small" id="showWatchlist">ウォッチリストを見る</button>
       </div>
+      <div class="quick-start">
+        <textarea id="quickSearchText" rows="3" placeholder="会社URL、または研究テーマをそのまま入力してください。例：https://example.co.jp / 食品残渣を使った発酵素材の試作費を探したい"></textarea>
+        <div class="quick-start__actions">
+          <button class="button button--primary-warm" id="quickSearchBtn" type="button">この内容で探す</button>
+          <button class="button" id="companyUrlBtn" type="button">会社URLから条件を提案</button>
+        </div>
+      </div>
       <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
       <div id="chatInput" class="chat-input-row" hidden>
+        <p id="chatInputHint" class="chat-input-hint">選択肢にないときだけ入力してください。</p>
         <input id="chatTextInput" type="text" class="chat-text-input" placeholder="自由に入力..." autocomplete="off" />
         <button id="chatSendBtn" type="button" class="button button--primary chat-send-btn">送信</button>
       </div>
@@ -81,41 +69,53 @@
     <section class="layout">
       <div>
         <div class="section-title compact">
-          <h2>あなたにおすすめの助成金・補助金</h2>
-          <p id="resultMeta">条件を入力して検索してください。</p>
+          <h2>候補</h2>
+          <p id="resultMeta">条件を入れると、近い公募を並べます。</p>
         </div>
         <div id="results" class="result-list"></div>
       </div>
       <aside class="side-panel">
         <div class="side-feature-card side-feature-card--mint">
-          <div class="side-feature-card__eyebrow">AI 要点整理</div>
-          <h3 class="side-feature-card__title">やさしく読む</h3>
-          <p class="side-feature-card__desc">
-            難しい公募要件をAIが要点整理します。
-            結果カードの「やさしく読む」ボタンで確認できます。
-          </p>
+          <div class="side-feature-card__eyebrow">りこが見ること</div>
+          <h3 class="side-feature-card__title">見るポイント</h3>
+          <ul class="side-steps">
+            <li>テーマとの相性</li>
+            <li>対象条件</li>
+            <li>準備の重さ</li>
+          </ul>
+          <p class="side-feature-card__desc">結果カードでやさしく整理します。</p>
         </div>
         <div class="side-feature-card side-feature-card--warm">
-          <div class="side-feature-card__eyebrow">はじめての方へ</div>
-          <h3 class="side-feature-card__title">3ステップで探せます</h3>
-          <ol class="side-steps">
-            <li>チャットで業種・フェーズを入力</li>
-            <li>一覧から気になる公募をウォッチ保存</li>
-            <li>専門家に相談して申請をサポート</li>
-          </ol>
-          <button class="button button--small button--primary-warm"
-                  data-lead-type="feedback">無料相談をする →</button>
+          <div class="side-feature-card__eyebrow">お知らせ</div>
+          <h3 class="side-feature-card__title">有料診断は準備中です</h3>
+          <p class="side-feature-card__desc">今は無料の検索と要約をご利用ください。</p>
+          <a class="button button--small" href="/paid.html">案内を見る</a>
         </div>
         <div class="side-actions">
           <button class="button button--small" id="runCompare">比較する</button>
           <button class="button button--small" id="runReadiness">準備チェック</button>
-          <button class="button button--small" data-lead-type="automation_pack">自動化相談</button>
-          <button class="button button--small" data-lead-type="expert_listing">専門家掲載</button>
+          <a class="button button--small" href="/paid.html">有料診断を見る</a>
         </div>
         <div id="sideOutput" class="side-output"></div>
       </aside>
     </section>
   </main>
+
+  <section class="site-disclaimer">
+    <div class="site-disclaimer__inner">
+      <strong>本サイトの情報について</strong>
+      <p>
+        りこナビの情報は、各補助金・助成金・公募情報をもとに作成した参考情報です。
+        応募可否、対象経費、申請条件、締切等の最終確認は、公式サイト・公募要領をご確認ください。
+        りこナビは採択や補助金の受給を保証するものではありません。
+      </p>
+      <p class="site-disclaimer__links">
+        <a href="#" data-lead-type="feedback">りこへの改善メモを送る</a>
+        <span aria-hidden="true">・</span>
+        <a href="#" data-lead-type="expert_listing">専門家掲載について</a>
+      </p>
+    </div>
+  </section>
 
   <section class="trust-banner">
     <div class="trust-banner__inner">
@@ -167,6 +167,6 @@
     </form>
   </dialog>
 
-  <script src="/app.js"></script>
+  <script src="/app.js?v=20260601-deadline-status"></script>
 </body>
 </html>

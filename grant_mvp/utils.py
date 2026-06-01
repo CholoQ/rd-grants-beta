@@ -55,6 +55,9 @@ def contains_any(text: str, terms: List[str]) -> bool:
 
 def parse_budget_min(text: str) -> Optional[int]:
     cleaned = text.replace(",", "")
+    range_to_oku = re.search(r"(\d+(?:\.\d+)?)\s*(?:万|万円)?\s*[〜~～\-]\s*(\d+(?:\.\d+)?)\s*億円?", cleaned)
+    if range_to_oku:
+        return int(float(range_to_oku.group(1)) * 10_000)
     m = re.search(r"(\d+(?:\.\d+)?)\s*億円\s*(?:以上|超|程度|くらい)?", cleaned)
     if m:
         return int(float(m.group(1)) * 100_000_000)
@@ -93,10 +96,11 @@ def make_rationale(profile: ParsedProfile) -> str:
         parts.append("背景=" + ", ".join(profile.background_intents))
     if profile.negative_intents:
         parts.append("除外=" + ", ".join(profile.negative_intents))
+    if getattr(profile, "negative_sectors", None):
+        parts.append("除外分野=" + ", ".join(profile.negative_sectors))
     if profile.region:
         parts.append(f"地域={profile.region}")
     if profile.budget_min:
         parts.append(f"予算下限={profile.budget_min:,}円")
     return " / ".join(parts) if parts else "入力文から主要条件を抽出しました"
-
 

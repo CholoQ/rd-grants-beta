@@ -6,18 +6,24 @@ import re
 from .config import LEGAL_DISCLAIMER, GEMINI_MODEL, logger
 from .repository import get_grant_by_id, get_grants_by_ids, prepare_item, get_grant_summary_cache, upsert_grant_summary_cache
 from .utils import strip_html, unique
-from .detail_fetch import fetch_detail_bundle, merged_source_text, extract_budget_text, extract_deadline_text, extract_field_text
+from .detail_fetch import fetch_detail_bundle, merged_source_text, extract_budget_text, extract_deadline_text, extract_field_text, extract_embedded_guideline_pdf
 from .gemini_summary import summarize_grant_with_gemini
+from .status_utils import effective_status
 from hashlib import sha256
+
+SUMMARY_CACHE_VERSION = "summary-v2"
 
 FUNDING_ALLOW_TERMS = [
     "補助金", "助成金", "委託", "委託費", "研究費", "支援", "公募", "募集", "提案募集",
     "SBIR", "事業化", "実証", "PoC", "概念実証", "スタートアップ", "基金", "開発費",
+    "アクセラ", "アクセラレーター", "活動資金", "実証支援", "協業費", "共創",
+    "GAPファンド", "ギャップファンド", "STS", "DTSU", "自治体実証", "実証フィールド",
 ]
 
 FUNDING_STRONG_ALLOW_TERMS = [
     "補助", "助成", "委託", "研究開発", "提案", "事業費", "実証", "PoC", "概念実証",
-    "A-STEP", "SBIR", "D-Global", "START", "大学発新産業創出基金",
+    "A-STEP", "SBIR", "D-Global", "START", "大学発新産業創出基金", "アクセラ", "活動資金", "支援金",
+    "GAPファンド", "ギャップファンド", "NEDO", "STS", "DTSU",
 ]
 
 FUNDING_DENY_TERMS = [
@@ -47,6 +53,12 @@ def is_funding_support_candidate(title: str, detail: str = "", href: Optional[st
 
 def funding_type_label(title: str, detail: str = "") -> str:
     hay = f"{title} {detail}".lower()
+    if any(term in hay for term in ["gapファンド", "ギャップファンド", "大学発新産業創出基金"]):
+        return "GAPファンド"
+    if any(term in hay for term in ["nedo", "sts", "dtsu", "sbir"]):
+        return "研究開発型スタートアップ支援"
+    if any(term in hay for term in ["アクセラ", "アクセラレーター", "活動資金", "実証支援", "協業費", "共創", "実証フィールド"]):
+        return "アクセラ・活動資金"
     if "補助" in hay:
         return "補助金"
     if "助成" in hay:
@@ -70,13 +82,33 @@ def _text_list(*values: str) -> List[str]:
 
 
 def _infer_documents(item: Dict) -> List[str]:
-    docs = ["公募要領", "申請フォーム", "事業概要", "会社概要"]
+    docs: List[str] = []
     text = f"{item.get('title') or ''} {item.get('detail') or ''} {item.get('use_purpose') or ''}".lower()
-    if any(k in text for k in ["見積", "設備", "導入"]):
-        docs.append("見積書")
-    if any(k in text for k in ["研究", "実証", "poc", "試作"]):
-        docs.append("研究開発計画")
-    return docs
+
+    def add(label: str) -> None:
+        if label not in docs:
+            docs.append(label)
+
+    add("申請書・応募フォーム")
+    add("事業計画書")
+    if any(k in text for k in ["研究", "実証", "poc", "試作", "開発", "技術"]):
+        add("研究開発計画書（目的・体制・スケジュール）")
+    add("経費明細・資金計画")
+    if any(k in text for k in ["会社概要", "法人", "企業", "中小企業", "事業者"]):
+        add("会社概要・事業概要資料")
+    if any(k in text for k in ["決算", "財務", "貸借対照表", "損益計算書"]):
+        add("直近の決算書・財務資料")
+    if any(k in text for k in ["納税", "税"]):
+        add("納税証明書")
+    if any(k in text for k in ["見積", "設備", "装置", "機器", "導入", "外注", "委託"]):
+        add("見積書・仕様書・カタログ")
+    if any(k in text for k in ["共同", "連携", "コンソーシアム", "大学", "研究機関"]):
+        add("共同実施者の役割分担・同意書")
+    if any(k in text for k in ["gビズ", "gbiz", "jグランツ", "jgrants", "電子申請"]):
+        add("GビズIDプライム")
+    if any(k in text for k in ["特許", "知財", "商標"]):
+        add("知財・特許の説明資料")
+    return docs[:8]
 
 
 def _infer_expenses(item: Dict) -> List[str]:
@@ -162,8 +194,56 @@ def _looks_meaningful(value):
     text = str(value or '').strip()
     if not text or text == '要確認':
         return False
-    bad = ['目次', '........', '……', '第1章', '第2章', '1.1.1']
+    bad = [
+        '目次', '........', '……', '第1章', '第2章', '1.1.1',
+        '公募要領に記載', '書類一式', '公式公募要領で確認', '公式要領で確認',
+        '詳細は公式', '対象条件・締切・必要書類',
+    ]
     return not any(b in text for b in bad)
+
+
+def _meaningful_list(value, fallback: List[str]) -> List[str]:
+    raw = value if isinstance(value, list) else ([value] if value else [])
+    out = []
+    for item in raw:
+        text = _sanitize_summary_value(item, '')
+        if _looks_meaningful(text) and text not in out:
+            out.append(text)
+    return out or fallback
+
+
+def _find_context_sentences(text: str, keywords: List[str], limit: int = 3) -> List[str]:
+    chunks = re.split(r'[。\n]', strip_html(text or ''))
+    hits: List[str] = []
+    for chunk in chunks:
+        cleaned = re.sub(r'\s+', ' ', chunk).strip(' ・:：\t')
+        if len(cleaned) < 6:
+            continue
+        if any(k.lower() in cleaned.lower() for k in keywords):
+            hits.append(_sanitize_summary_value(cleaned[:120], ''))
+        if len(hits) >= limit:
+            break
+    return unique([h for h in hits if h])
+
+
+def _is_generic_legal_noise(text: str) -> bool:
+    lowered = (text or "").lower()
+    noise_terms = [
+        "暴力団", "反社会的", "反社", "役員等", "資金等を供給", "便宜を供与",
+        "公序良俗", "虚偽", "法令違反", "適正化法",
+    ]
+    return any(term.lower() in lowered for term in noise_terms)
+
+
+def _infer_ineligible_or_unclear(combined_text: str) -> List[str]:
+    hits = _find_context_sentences(combined_text, ["対象外", "補助対象外", "助成対象外", "対象とならない", "認められません", "交付決定前"], 4)
+    hits = [h for h in hits if not _is_generic_legal_noise(h)]
+    if hits:
+        return hits[:4]
+    return [
+        "交付決定前に発注・契約した費用は対象外になりやすいです",
+        "事業と直接関係しない汎用備品・通常経費は対象外になりやすいです",
+    ]
 
 
 def _gemini_extract_summary(item: Dict, bundle: Dict[str, object], combined_text: str) -> Optional[Dict[str, object]]:
@@ -242,15 +322,116 @@ purpose, target_conditions, field, budget, deadline, eligible_expenses, required
     return cleaned if meaningful_count >= 4 else None
 
 
+def _build_exclusion_risks(item: Dict, combined_text: str, cautions_list: List[str]) -> List[Dict]:
+    risks: List[Dict] = []
+    text = (combined_text or "") + " " + " ".join(cautions_list or [])
+    if effective_status(item) == "closed":
+        risks.append({"label": "締切を過ぎているため、この回には応募できません", "level": "high"})
+    region = (item.get("target_area_search") or "").strip()
+    if region and "全国" not in region:
+        risks.append({"label": f"対象地域が限られます（{region}）", "level": "high"})
+    if effective_status(item) == "upcoming":
+        risks.append({"label": "募集開始前のため、受付開始日まで申請できません", "level": "medium"})
+    employees = (item.get("target_number_of_employees") or "").strip()
+    if employees and not any(k in employees for k in ("制限なし", "制約なし", "なし", "全規模", "問わない", "指定なし")):
+        risks.append({"label": f"従業員数の条件があります（{employees}）", "level": "medium"})
+    for sentence in _find_context_sentences(text, ["対象外", "補助対象外", "対象とならない", "認められません"], 2):
+        if _is_generic_legal_noise(sentence):
+            continue
+        risks.append({"label": sentence, "level": "medium"})
+    if not risks:
+        risks.append({"label": "本文上、大きな対象外リスクは目立ちません。地域・経費・事前着手だけ先に確認しましょう", "level": "low"})
+    return risks[:6]
+
+
+def _build_difficulty(item: Dict, combined_text: str, required_documents: List[str]) -> Dict:
+    reasons: List[str] = []
+    score = 2
+    doc_count = len(required_documents or [])
+    if doc_count >= 6:
+        score += 1
+        reasons.append(f"書類量: {doc_count}点前後。標準的な小型公募（3〜4点）より重めです")
+        heavy_docs = []
+        for doc in required_documents:
+            if any(k in doc for k in ["事業計画", "研究開発計画", "取組内容", "経費", "決算", "定款", "見積"]):
+                heavy_docs.append(doc)
+        if heavy_docs:
+            reasons.append(f"重い書類: {'、'.join(heavy_docs[:3])}")
+    if not item.get("subsidy_rate"):
+        score += 1
+        reasons.append("補助率がすぐに読めないため、経費計画の確認に時間がかかりそうです")
+    if not item.get("detail_plain") and not (combined_text or "").strip():
+        score += 1
+        reasons.append("公開情報が少なく、申請条件の読み取りに時間がかかりそうです")
+    max_limit = item.get("subsidy_max_limit") or 0
+    if isinstance(max_limit, (int, float)) and max_limit >= 100_000_000:
+        score += 1
+        reasons.append("大型案件のため事業計画の精度が求められる可能性があります")
+    lower = (combined_text or "").lower()
+    if any(k in lower for k in ["事前相談", "事前協議"]):
+        score += 1
+        reasons.append("申請前の事前相談が必要になりそうです")
+    if any(k in lower for k in ["コンソーシアム", "共同", "連携機関"]):
+        score += 1
+        reasons.append("共同実施者や役割分担の整理が必要になりそうです")
+    if any(k in lower for k in ["見積", "設備", "装置"]):
+        reasons.append("設備・外注費: 見積や仕様の整理が必要です")
+    if score < 1:
+        score = 1
+    if score > 5:
+        score = 5
+    label_map = {1: "低", 2: "やや低", 3: "中", 4: "やや高", 5: "高"}
+    label = label_map.get(score, "中")
+    if not reasons:
+        reasons.append("申請書と事業計画を中心に準備する、一般的な研究開発公募の重さです")
+    return {"score": score, "label": label, "reasons": reasons[:4]}
+
+
+def _build_prep_load(difficulty: Dict) -> Dict:
+    score = difficulty.get("score", 3)
+    table = {1: (1, 2), 2: (2, 3), 3: (2, 4), 4: (4, 8), 5: (6, 10)}
+    w_min, w_max = table.get(score, (2, 4))
+    return {"weeks_min": w_min, "weeks_max": w_max, "label": f"{w_min}〜{w_max}週間（目安）"}
+
+
+def _build_expert_needed(difficulty: Dict, item: Dict, combined_text: str) -> Dict:
+    score = difficulty.get("score", 3)
+    text = f"{item.get('title') or ''} {combined_text or ''}".lower()
+    types = ["中小企業診断士"]
+    if any(k in text for k in ["特許", "知財", "商標"]):
+        types.append("弁理士")
+    if any(k in text for k in ["許認可", "申請", "行政"]):
+        types.append("行政書士")
+    if any(k in text for k in ["決算", "会計", "経理"]):
+        types.append("税理士・公認会計士")
+    if score >= 4:
+        return {"level": "high", "label": "専門家への相談を強く検討してください", "types": types[:3]}
+    if score == 3:
+        return {"level": "recommended", "label": "専門家への相談を検討してください", "types": types[:3]}
+    return {"level": "optional", "label": "必要に応じて専門家への相談を検討してください", "types": types[:2]}
+
+
 def build_grant_summary(grant_id: str) -> Dict:
     item = get_grant_by_id(grant_id)
     if not item:
         raise ValueError("指定した制度が見つかりません")
     item = prepare_item(item)
+    item["status"] = effective_status(item)
     official_url = item.get("safe_public_url") or item.get("front_subsidy_detail_page_url")
     bundle = fetch_detail_bundle(official_url or "")
+    embedded_pdf = extract_embedded_guideline_pdf(item)
+    if embedded_pdf.get("pdf_text"):
+        bundle = dict(bundle)
+        bundle["pdf_text"] = embedded_pdf.get("pdf_text")
+        if embedded_pdf.get("pdf_name"):
+            bundle["pdf_url"] = embedded_pdf.get("pdf_name")
+        notes = list(bundle.get("notes") or [])
+        if embedded_pdf.get("note"):
+            notes.insert(0, str(embedded_pdf.get("note")))
+        notes = [n for n in notes if "公募要領PDFは見つかりません" not in n and "詳細ページ本文は取得できません" not in n]
+        bundle["notes"] = unique(notes)
     combined_text = merged_source_text(item, bundle)
-    source_text_hash = sha256((combined_text or "").encode("utf-8")).hexdigest()
+    source_text_hash = sha256((SUMMARY_CACHE_VERSION + "\n" + (combined_text or "")).encode("utf-8")).hexdigest()
 
     cached = get_grant_summary_cache(str(item.get("id") or ""), source_text_hash)
     fixed_ai_summary = cached.get("summary") if cached else None
@@ -301,6 +482,13 @@ def build_grant_summary(grant_id: str) -> Dict:
             return fixed_ai_summary.get(key)
         return fallback
 
+    final_cautions = _meaningful_list(ai_value('cautions', unique(cautions)), unique(cautions) or ["締切、対象経費、事前着手の扱いを先に確認してください"])
+    final_required_documents = _meaningful_list(ai_value('required_documents', document_candidates), document_candidates)
+    exclusion_risks = _build_exclusion_risks(item, combined_text, final_cautions if isinstance(final_cautions, list) else [str(final_cautions)])
+    difficulty_result = _build_difficulty(item, combined_text, final_required_documents if isinstance(final_required_documents, list) else [])
+    prep_load_result = _build_prep_load(difficulty_result)
+    expert_needed_result = _build_expert_needed(difficulty_result, item, combined_text)
+
     summary = {
         "overview": ai_value('overview', overview),
         "purpose": ai_value('purpose', purpose),
@@ -309,23 +497,37 @@ def build_grant_summary(grant_id: str) -> Dict:
         "budget": ai_value('budget', extract_budget_text(combined_text, item.get('subsidy_rate'), item.get('subsidy_max_limit'))),
         "deadline": ai_value('deadline', extract_deadline_text(combined_text, item.get("acceptance_end_datetime") or item.get("project_end_deadline"))),
         "eligible_expenses": ai_value('eligible_expenses', expenses),
-        "ineligible_or_unclear": ["対象外経費や細かな条件は公式要領で確認が必要です"],
-        "required_documents": ai_value('required_documents', document_candidates),
-        "application_steps": ai_value('preparation_tasks', ["制度概要を確認", "公募要領と応募資格を確認", "必要書類をそろえる", "提出前に条件を再確認する"]),
-        "cautions": ai_value('cautions', unique(cautions) or ["対象条件・締切・必要書類は公式要領で再確認してください"]),
+        "ineligible_or_unclear": _infer_ineligible_or_unclear(combined_text),
+        "required_documents": final_required_documents,
+        "application_steps": _meaningful_list(ai_value('preparation_tasks', []), ["対象地域・応募資格を確認する", "研究開発計画と経費明細を作る", "見積書・決算書など添付書類をそろえる", "締切の数日前までに電子申請を完了する"]),
+        "cautions": final_cautions,
         "common_misses": ["地域要件の見落とし", "締切日の取り違え", "必要書類の不足", "研究フェーズと制度のずれ"],
         "suitable_for": ai_value('suitable_for', ["要確認"]),
         "not_suitable_for": ai_value('not_suitable_for', ["要確認"]),
         "rd_phase": ai_value('rd_phase', "unknown"),
         "expert_type_needed": ai_value('expert_type_needed', ["要確認"]),
-        "first_questions_to_ask": ai_value('first_questions_to_ask', ["公式要領で応募資格・対象経費・締切を確認してください"]),
+        "first_questions_to_ask": _meaningful_list(ai_value('first_questions_to_ask', []), ["自社の所在地・業種・規模は対象に入るか", "人件費・外注費・設備費のうち使いたい費用は対象か", "交付決定前に発注・契約していないか", "締切までにGビズIDや添付書類がそろうか"]),
         "gemini_summary": fixed_ai_summary,
         "summary_source": summary_source,
+        "exclusion_risks": exclusion_risks,
+        "difficulty": difficulty_result,
+        "prep_load": prep_load_result,
+        "expert_needed": expert_needed_result,
     }
     return {
         "id": item.get("id"),
         "title": item.get("title"),
+        "institution_name": item.get("institution_name"),
+        "system_name": item.get("system_name"),
+        "source": item.get("source"),
+        "status": item.get("status"),
+        "target_area_search": item.get("target_area_search"),
+        "subsidy_rate": item.get("subsidy_rate"),
+        "subsidy_max_limit": item.get("subsidy_max_limit"),
+        "acceptance_end_datetime": item.get("acceptance_end_datetime"),
         "official_url": official_url,
+        "front_subsidy_detail_page_url": item.get("front_subsidy_detail_page_url"),
+        "safe_public_url": item.get("safe_public_url"),
         "pdf_url": bundle.get('pdf_url'),
         "pdf_note": pdf_note,
         "source_text_hash": source_text_hash,

@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("GRANT_MVP_DB_PATH", str(BASE_DIR / "grants.db"))).resolve()
+SNAPSHOT_DB_PATH = Path(os.getenv("GRANT_MVP_SNAPSHOT_DB_PATH", str(BASE_DIR / "grants.snapshot.db"))).resolve()
 STATIC_DIR = BASE_DIR / "static"
 HOST = os.getenv("APP_HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", os.getenv("APP_PORT", "8000")))
@@ -20,12 +21,15 @@ JGRANTS_REQUEST_TIMEOUT = max(5, int(os.getenv("JGRANTS_REQUEST_TIMEOUT", "20"))
 JGRANTS_MAX_ITEMS = max(20, int(os.getenv("JGRANTS_MAX_ITEMS", "180")))
 DISCOVERY_KEYWORDS = [
     "補助金", "助成金", "研究開発", "スタートアップ", "創業", "展示会", "販路開拓",
-    "海外展開", "DX", "設備投資", "福岡", "北海道", "大学発"
+    "海外展開", "DX", "設備投資", "福岡", "北海道", "大学発", "アクセラ",
+    "アクセラレーター", "活動資金", "実証支援", "共創", "協業",
+    "GAPファンド", "ギャップファンド", "NEDO", "STS", "SBIR", "自治体実証"
 ]
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/models")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
@@ -41,6 +45,7 @@ FAST_MODE_DEFAULT = os.getenv("FAST_MODE_DEFAULT", "1") == "1"
 ENABLE_LLM_PROFILE_IN_FAST_MODE = os.getenv("ENABLE_LLM_PROFILE_IN_FAST_MODE", "0") == "1"
 ENABLE_LIVE_FETCH_IN_FAST_MODE = os.getenv("ENABLE_LIVE_FETCH_IN_FAST_MODE", "0") == "1"
 ENABLE_LLM_RERANK_IN_FAST_MODE = os.getenv("ENABLE_LLM_RERANK_IN_FAST_MODE", "0") == "1"
+AUTO_REFRESH_MAX_AGE_HOURS = max(1, int(os.getenv("AUTO_REFRESH_MAX_AGE_HOURS", "24")))
 NATIONAL_TERMS = ["全国", "日本全国", "国内全域"]
 REGION_ALIASES = {
     "北海道": ["北海道"],
@@ -93,7 +98,7 @@ REGION_ALIASES = {
 }
 
 INTENT_KEYWORDS = {
-    "research": ["研究", "研究開発", "実証", "poc", "poC", "試作", "プロトタイプ", "ラボ"],
+    "research": ["研究", "研究開発", "実証", "poc", "poC", "試作", "プロトタイプ", "ラボ", "活動資金", "実証支援", "協業費", "GAPファンド", "ギャップファンド", "STS", "SBIR"],
     "equipment": ["設備", "設備投資", "装置", "機械", "導入"],
     "marketing": ["販路", "販路開拓", "営業", "広告", "pr", "ブランディング", "マーケ"],
     "exhibition": ["展示会", "見本市", "出展"],
@@ -108,25 +113,28 @@ EXPENSE_KEYWORDS = {
     "exhibition": ["展示会", "見本市", "出展", "小間", "ブース"],
     "marketing": ["広告", "pr", "広報", "販促", "マーケ"],
     "sales": ["販路", "営業", "商談", "市場調査"],
-    "rd": ["研究", "試作", "実証", "開発"],
+    "rd": ["研究", "試作", "実証", "開発", "PoC費用", "活動資金", "実証支援", "協業費", "GAPファンド", "ギャップファンド", "STS", "SBIR"],
     "equipment": ["設備", "装置", "機械", "導入"],
     "ip": ["知財", "知的財産", "特許", "商標", "意匠", "出願", "弁理士", "pct", "PCT", "外国出願", "先行技術調査"],
 }
 SECTOR_KEYWORDS = {
     "space": ["宇宙", "衛星", "ロケット", "space"],
-    "healthcare": ["ヘルスケア", "医療", "創薬", "バイオ"],
-    "agri": ["農業", "アグリ", "畜産", "食品"],
+    "medical": ["医療", "医療機器", "診断", "治療", "臨床", "病院", "患者", "画像診断", "医療dx", "医療DX"],
+    "bio": ["バイオ", "創薬", "細胞", "遺伝子", "抗体", "タンパク質", "再生医療", "ゲノム"],
+    "healthcare": ["ヘルスケア", "healthcare", "健康", "予防", "未病", "ウェルネス", "介護", "睡眠", "生活習慣", "腸内環境", "腸内細菌", "腸内フローラ", "菌叢", "マイクロバイオーム", "microbiome", "gut microbiome", "健康寿命"],
+    "agri": ["農業", "アグリ", "畜産", "農林水産", "スマート農業", "植物", "作物", "栽培", "土壌", "圃場", "内生菌", "エンドファイト", "微生物"],
+    "foodtech": ["フードテック", "食品", "食料", "発酵", "代替肉", "培養肉", "機能性食品"],
     "energy": ["エネルギー", "蓄電", "再エネ"],
     "nuclear": ["原子力"],
     "deeptech": ["ディープテック", "先端技術", "先端", "高度技術"],
-    "fintech": ["フィンテック", "金融サービス", "金融分野", "金融事業者", "金融機関"],
+    "fintech": ["フィンテック", "金融サービス", "金融分野", "金融事業者"],
 }
 MEDIA_TERMS = ["コンテンツ", "アニメ", "ゲーム", "実写", "音楽", "映画", "映像", "IP新規創出", "著作権"]
 IP_CONTENT_TERMS = ["新規IP", "コンテンツ", "アニメ", "ゲーム", "実写", "音楽", "映画", "映像"]
 SMALL_RD_TERMS = ["小さな研究開発", "小規模研究開発", "試作", "PoC", "実証", "プロトタイプ"]
 SMALL_COMPANY_TERMS = ["小規模", "中小企業", "創業", "スタートアップ", "ベンチャー"]
 LARGE_PROJECT_TERMS = ["コンソーシアム", "大規模", "複数機関", "国家プロジェクト", "大型" ]
-STARTUP_TERMS = ["スタートアップ", "創業", "ベンチャー", "シード", "アーリー"]
+STARTUP_TERMS = ["スタートアップ", "創業", "ベンチャー", "シード", "アーリー", "アクセラ", "アクセラレーター", "研究開発型スタートアップ", "大学発スタートアップ"]
 UNIVERSITY_TERMS = ["大学発", "産学", "共同研究", "研究機関", "大学" ]
 STOPWORDS = {"です", "ます", "したい", "費用", "予算", "以上", "社員", "本社", "会社", "法人", "使える", "補助金", "助成金", "ありますか"}
 
@@ -143,12 +151,13 @@ PROFILE_SCHEMA = {
         "entity_type": {"type": ["string", "null"]},
         "keywords": {"type": "array", "items": {"type": "string"}},
         "sectors": {"type": "array", "items": {"type": "string"}},
+        "negative_sectors": {"type": "array", "items": {"type": "string"}},
         "budget_min": {"type": ["integer", "null"]},
         "is_startup": {"type": "boolean"},
         "university_origin": {"type": "boolean"},
         "rationale": {"type": "string"}
     },
-    "required": ["company_phases", "intents", "background_intents", "negative_intents", "expense_types", "region", "employee_count", "entity_type", "keywords", "sectors", "budget_min", "is_startup", "university_origin", "rationale"],
+    "required": ["company_phases", "intents", "background_intents", "negative_intents", "expense_types", "region", "employee_count", "entity_type", "keywords", "sectors", "negative_sectors", "budget_min", "is_startup", "university_origin", "rationale"],
     "additionalProperties": False,
 }
 

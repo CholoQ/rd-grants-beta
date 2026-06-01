@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>応募前チェック｜りこナビ β</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<nav class="site-nav">
+  <div class="site-nav__inner">
+    <a class="site-nav__logo" href="/">
+      <span class="logo-mark">りこ</span>
+      <div class="logo-text-group">
+        <span class="logo-text">りこナビ</span>
+        <span class="logo-sub">研究資金を、いっしょに探して見極める</span>
+      </div>
+    </a>
+    <ul class="site-nav__links">
+      <li><a href="/#search">助成金を探す</a></li>
+      <li><a href="#">やさしく知る</a></li>
+      <li><a href="#">活用事例</a></li>
+      <li><a href="#">よくある質問</a></li>
+    </ul>
+    <div class="site-nav__cta">
+      <a class="button button--ghost" href="/" id="checkBackLink">← 一覧へ戻る</a>
+    </div>
+  </div>
+</nav>
+
+<main class="detail-main check-main">
+  <div class="detail-disclaimer detail-disclaimer--top">
+    <strong>本チェックについて（ご一読ください）</strong>
+    <p>
+      本チェックは入力情報および公開情報に基づく簡易チェックです。
+      応募可否や採択可能性を保証するものではありません。
+      実際の申請にあたっては、公式公募要領および実施機関の案内をご確認ください。
+    </p>
+  </div>
+
+  <section class="card detail-head" id="checkGrantHead">
+    <p class="eyebrow" id="checkEyebrow">読み込み中...</p>
+    <h1 id="checkGrantTitle">公募情報を取得しています</h1>
+    <div class="detail-facts" id="checkGrantFacts"></div>
+    <p><a class="button button--small" id="checkDetailLink" href="#">← 補助金の詳細ページに戻る</a></p>
+  </section>
+
+  <section class="card check-section" id="checkRestoreSection" hidden>
+    <p class="check-restore-text">この補助金の前回の回答が保存されています。読み込みますか？</p>
+    <div class="check-restore-actions">
+      <button type="button" class="button" id="checkRestoreBtn">前回の回答を読み込む</button>
+      <button type="button" class="button button--small" id="checkDismissRestoreBtn">読み込まない</button>
+    </div>
+  </section>
+
+  <form class="card check-section check-form" id="checkForm">
+    <div class="section-title compact">
+      <h2>応募前の簡易チェック</h2>
+      <p>10問の質問にお答えください。判定は公式公募要領の確認の参考としてご利用ください。</p>
+    </div>
+    <div id="checkQuestions" class="check-questions"></div>
+    <p id="checkValidation" class="check-validation" hidden>未回答の質問があります。すべての質問にお答えください。</p>
+    <div class="check-form-actions">
+      <button type="submit" class="button button--primary-warm">簡易チェックを実行する</button>
+      <button type="button" class="button" id="checkResetBtn">回答をリセット</button>
+    </div>
+  </form>
+
+  <section class="card check-section check-result" id="checkResult" hidden>
+    <div class="section-title compact">
+      <h2>簡易チェック結果</h2>
+      <p>本結果は応募可否や採択可能性を保証するものではありません。公式公募要領でご確認ください。</p>
+    </div>
+
+    <p class="check-overall-comment" id="checkOverallComment"></p>
+
+    <div class="check-badges">
+      <div class="check-badge-block">
+        <span class="check-badge-label">応募可能性</span>
+        <span class="check-badge" id="checkVerdictBadge">—</span>
+      </div>
+      <div class="check-badge-block">
+        <span class="check-badge-label">対象外リスク</span>
+        <span class="check-badge" id="checkExclusionBadge">—</span>
+      </div>
+      <div class="check-badge-block">
+        <span class="check-badge-label">準備リスク</span>
+        <span class="check-badge" id="checkPrepBadge">—</span>
+      </div>
+    </div>
+
+    <div class="check-result-block">
+      <h3>対象外リスクの可能性がある項目</h3>
+      <ul class="detail-risks" id="checkExclusionList"></ul>
+    </div>
+
+    <div class="check-result-block">
+      <h3>要確認ポイント</h3>
+      <ul class="detail-list" id="checkReviewList"></ul>
+    </div>
+
+    <div class="check-result-block">
+      <h3>次にやること</h3>
+      <ol class="detail-steps" id="checkNextList"></ol>
+    </div>
+
+    <div class="check-result-cta">
+      <a class="button button--primary-warm" id="checkOfficialBtn" href="#" target="_blank" rel="noopener" hidden>公式公募要領で確認する</a>
+      <a class="button" id="checkBackToDetail" href="#">補助金の詳細ページを見る</a>
+      <a class="button" href="/paid.html">有料診断について相談する</a>
+      <button type="button" class="button button--small" id="checkRetryBtn">もう一度回答する</button>
+    </div>
+
+    <p class="check-expert-note">
+      不明な点が多い場合は、公式公募要領の確認と専門家への相談を検討してください。
+      本サイトは個別の士業・専門家の紹介や斡旋は行いません。
+    </p>
+  </section>
+
+  <div class="detail-disclaimer detail-disclaimer--bottom">
+    <p>
+      本チェックは入力情報および公開情報に基づく簡易チェックです。
+      応募可否や採択可能性を保証するものではありません。
+      実際の申請にあたっては、公式公募要領および実施機関の案内をご確認ください。
+    </p>
+  </div>
+</main>
+
+<script src="/check.js"></script>
+</body>
+</html>

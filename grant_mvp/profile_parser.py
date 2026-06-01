@@ -18,6 +18,32 @@ from .utils import (
     normalize_region, parse_budget_min, split_background_and_desired, unique
 )
 
+SECTOR_NEGATION_PATTERNS = {
+    "medical": [
+        r"医療(?:系|関連|dx|DX)?(?:は|を|も)?(?:除|外|いらない|不要|避け)",
+        r"病院(?:向け|関連)?(?:は|を|も)?(?:除|外|いらない|不要|避け)",
+        r"臨床(?:は|を|も)?(?:除|外|いらない|不要|避け)",
+        r"(?:exclude|no|avoid)\s+(?:medical|hospital|clinical)",
+    ],
+    "drug_discovery": [
+        r"創薬(?:は|を|も)?(?:除|外|いらない|不要|避け)",
+        r"医薬(?:品)?(?:は|を|も)?(?:除|外|いらない|不要|避け)",
+        r"(?:exclude|no|avoid)\s+(?:drug|pharma|drug discovery)",
+    ],
+}
+
+
+def infer_negative_sectors_from_text(text: str) -> List[str]:
+    lowered = text or ""
+    hits: List[str] = []
+    for sector, patterns in SECTOR_NEGATION_PATTERNS.items():
+        if any(re.search(pattern, lowered, flags=re.I) for pattern in patterns):
+            hits.append(sector)
+    if "medical" in hits and contains_any(lowered, ["ヘルスケア", "healthcare", "腸内環境", "腸内細菌", "マイクロバイオーム", "microbiome", "未病", "予防"]):
+        hits.append("drug_discovery")
+    return unique(hits)
+
+
 def parse_profile_heuristic(user_text: str) -> ParsedProfile:
     lower = user_text.lower()
     phases: List[str] = []
@@ -56,6 +82,7 @@ def parse_profile_heuristic(user_text: str) -> ParsedProfile:
         expense_types = [name for name, words in EXPENSE_KEYWORDS.items() if contains_any(lower, words)]
 
     sectors = [name for name, words in SECTOR_KEYWORDS.items() if contains_any(lower, words)]
+    negative_sectors = infer_negative_sectors_from_text(user_text)
     region = normalize_region(user_text)
 
     employee_count = None
@@ -77,6 +104,7 @@ def parse_profile_heuristic(user_text: str) -> ParsedProfile:
         entity_type="company" if contains_any(user_text, ["会社", "法人", "株式会社", "合同会社", "スタートアップ", "ベンチャー"]) else None,
         keywords=unique(keywords)[:10],
         sectors=unique(sectors),
+        negative_sectors=negative_sectors,
         budget_min=parse_budget_min(user_text),
         is_startup=contains_any(user_text, STARTUP_TERMS),
         university_origin=contains_any(user_text, UNIVERSITY_TERMS),
@@ -93,6 +121,7 @@ def merge_profiles(primary: ParsedProfile, fallback: ParsedProfile) -> ParsedPro
     primary.negative_intents = unique(primary.negative_intents + fallback.negative_intents)
     primary.expense_types = unique(primary.expense_types + fallback.expense_types)
     primary.sectors = unique(primary.sectors + fallback.sectors)
+    primary.negative_sectors = unique(primary.negative_sectors + fallback.negative_sectors)
     primary.keywords = unique(primary.keywords + fallback.keywords)[:10]
     if not primary.region:
         primary.region = fallback.region
@@ -126,7 +155,7 @@ def parse_profile_with_openai(user_text: str) -> Optional[ParsedProfile]:
     body = {
         "model": OPENAI_MODEL,
         "input": [
-            {"role": "system", "content": "日本語の自由記述から補助金検索条件をJSONで抽出してください。推測しすぎず、分からないものは null や空配列にしてください。intents にはユーザーが今回本当に欲しい用途だけを入れてください。background_intents には背景説明の用途、negative_intents には今回は求めていない用途を入れてください。intents は research,equipment,marketing,exhibition,overseas_inspection,overseas_expansion,it,sustainability,ip から選ぶ。expense_types は travel,exhibition,marketing,sales,rd,equipment,ip から選ぶ。sectors は space,healthcare,agri,energy,nuclear,deeptech,fintech から選ぶ。company_phases は idea,seed,early,growth から選ぶ。地域は「本社は福岡」のような表現も都道府県名に正規化して region に入れる。"},
+            {"role": "system", "content": "日本語の自由記述から補助金検索条件をJSONで抽出してください。推測しすぎず、分からないものは null や空配列にしてください。intents にはユーザーが今回本当に欲しい用途だけを入れてください。background_intents には背景説明の用途、negative_intents には今回は求めていない用途を入れてください。intents は research,equipment,marketing,exhibition,overseas_inspection,overseas_expansion,it,sustainability,ip から選ぶ。expense_types は travel,exhibition,marketing,sales,rd,equipment,ip から選ぶ。sectors は space,medical,bio,healthcare,agri,foodtech,energy,nuclear,deeptech,fintech から選ぶ。negative_sectors は medical,drug_discovery から選ぶ。company_phases は idea,seed,early,growth から選ぶ。地域は「本社は福岡」のような表現も都道府県名に正規化して region に入れる。"},
             {"role": "user", "content": user_text},
         ],
         "text": {"format": {"type": "json_schema", "name": "grant_profile", "strict": True, "schema": PROFILE_SCHEMA}},
@@ -145,7 +174,7 @@ def parse_profile_with_anthropic(user_text: str) -> Optional[ParsedProfile]:
         "日本語の自由記述から補助金検索条件をJSONで抽出してください。intents には今回ほしい用途だけ、background_intents には背景用途、negative_intents には今回ほしくない用途を入れてください。"
         "intents は research,equipment,marketing,exhibition,overseas_inspection,overseas_expansion,it,sustainability,ip から選ぶ。"
         "expense_types は travel,exhibition,marketing,sales,rd,equipment,ip から選ぶ。"
-        "sectors は space,healthcare,agri,energy,nuclear,deeptech,fintech から選ぶ。地域は「本社は福岡」のような表現も都道府県名に正規化して region に入れる。"
+        "sectors は space,medical,bio,healthcare,agri,foodtech,energy,nuclear,deeptech,fintech から選ぶ。negative_sectors は medical,drug_discovery から選ぶ。地域は「本社は福岡」のような表現も都道府県名に正規化して region に入れる。"
         "company_phases は idea,seed,early,growth から選ぶ。"
         "JSON以外は返さないでください。\n\n"
         f"入力: {user_text}"
@@ -169,7 +198,7 @@ def parse_profile_with_gemini(user_text: str) -> Optional[ParsedProfile]:
         "研究開発費と販路開拓・展示会・海外視察費は区別してください。"
         "intents は research,equipment,marketing,exhibition,overseas_inspection,overseas_expansion,it,sustainability,ip。"
         "expense_types は travel,exhibition,marketing,sales,rd,equipment,ip。"
-        "sectors は space,healthcare,agri,energy,nuclear,deeptech,fintech。地域は「本社は福岡」のような表現も都道府県名に正規化して region に入れる。"
+        "sectors は space,medical,bio,healthcare,agri,foodtech,energy,nuclear,deeptech,fintech。negative_sectors は medical,drug_discovery。地域は「本社は福岡」のような表現も都道府県名に正規化して region に入れる。"
         "company_phases は idea,seed,early,growth。\n\n"
         f"入力: {user_text}"
     )
@@ -199,6 +228,9 @@ def enrich_profile(profile: ParsedProfile) -> None:
     profile.negative_intents = unique(profile.negative_intents)
     profile.expense_types = unique(profile.expense_types)
     profile.sectors = unique(profile.sectors)
+    profile.negative_sectors = unique(profile.negative_sectors)
+    if profile.negative_sectors:
+        profile.sectors = [s for s in profile.sectors if s not in profile.negative_sectors]
     profile.keywords = unique(profile.keywords)[:10]
     profile.region = normalize_region(profile.region)
 
@@ -237,6 +269,8 @@ def enrich_profile(profile: ParsedProfile) -> None:
         tags.extend([f"背景:{x}" for x in profile.background_intents])
     if profile.negative_intents:
         tags.extend([f"除外:{x}" for x in profile.negative_intents])
+    if profile.negative_sectors:
+        tags.extend([f"除外分野:{x}" for x in profile.negative_sectors])
     tags.extend(profile.expense_types)
     if profile.employee_count is not None:
         tags.append(f"{profile.employee_count}名")
@@ -280,6 +314,11 @@ def postprocess_profile_from_text(profile: ParsedProfile, user_text: str) -> Par
     desired_intents = infer_intents_from_segment(desired_text)
     background_intents = infer_intents_from_segment(background_text)
     desired_expenses = infer_expenses_from_segment(desired_text)
+    for sector in infer_negative_sectors_from_text(text):
+        if sector not in profile.negative_sectors:
+            profile.negative_sectors.append(sector)
+    if "healthcare" in profile.sectors and "medical" in profile.negative_sectors:
+        profile.sectors = [s for s in profile.sectors if s != "medical"]
 
     # 対比がある場合は右側を優先して希望用途として採用
     if contrast_marker and desired_intents:
@@ -359,5 +398,3 @@ def parse_profile(user_text: str) -> Tuple[ParsedProfile, str, List[Dict[str, st
                 "fallback": "heuristic",
             })
     return heuristic, "heuristic", diagnostics
-
-

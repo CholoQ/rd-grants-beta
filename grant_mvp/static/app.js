@@ -1,6 +1,7 @@
 const $ = (sel, root=document) => root.querySelector(sel);
 const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 const watchKey = 'rdFundingWatchlist:v1';
+const searchStateKey = 'rdFundingSearchState:v1';
 let lastItems = [];
 
 const leadCopy = {
@@ -20,6 +21,40 @@ function addWatch(item){
   }
 }
 function removeWatch(id){ setWatchlist(getWatchlist().filter(x => String(x.id)!==String(id))); }
+
+function saveSearchState(items, metaText, params) {
+  try {
+    localStorage.setItem(searchStateKey, JSON.stringify({
+      items: (items || []).slice(0, 20),
+      metaText: metaText || '',
+      params: params || null,
+      savedAt: Date.now(),
+    }));
+  } catch (_) {}
+}
+
+function getSearchState() {
+  try {
+    const state = JSON.parse(localStorage.getItem(searchStateKey) || 'null');
+    if (!state || !Array.isArray(state.items) || !state.items.length) return null;
+    if (Date.now() - Number(state.savedAt || 0) > 24 * 60 * 60 * 1000) return null;
+    return state;
+  } catch (_) {
+    return null;
+  }
+}
+
+function clearSearchState() {
+  try { localStorage.removeItem(searchStateKey); } catch (_) {}
+}
+
+function restoreSearchState() {
+  const state = getSearchState();
+  if (!state) return;
+  lastItems = state.items || [];
+  $('#resultMeta').textContent = state.metaText || `${lastItems.length}件の候補を表示中。`;
+  renderItems(lastItems);
+}
 
 async function api(path, options={}){
   const res = await fetch(path, {headers:{'Content-Type':'application/json'}, ...options});
@@ -78,58 +113,183 @@ function parseBudget(val) {
   return out;
 }
 
+function summarizeRiskLevel(risks) {
+  if (!Array.isArray(risks) || !risks.length) return { label: '要確認', cls: 'unknown' };
+  if (risks.some(r => r && r.level === 'high')) return { label: '高', cls: 'high' };
+  if (risks.some(r => r && r.level === 'medium')) return { label: '中', cls: 'mid' };
+  return { label: '低', cls: 'low' };
+}
+
+function expertLevelLabel(level) {
+  if (level === 'high') return '相談を強く検討';
+  if (level === 'recommended') return '相談を検討';
+  if (level === 'optional') return '必要に応じて検討';
+  return '要確認';
+}
+
+function officialUrlForItem(item) {
+  return item.safe_public_url || item.official_url || item.front_subsidy_detail_page_url || '';
+}
+
+function splitTextList(values) {
+  return (values || [])
+    .flatMap(v => String(v || '').split(' / '))
+    .map(v => v.trim())
+    .filter(Boolean);
+}
+
+function uniqText(values) {
+  const seen = new Set();
+  const out = [];
+  values.forEach(v => {
+    const text = String(v || '').trim();
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    out.push(text);
+  });
+  return out;
+}
+
+function textHasAny(text, terms) {
+  const hay = String(text || '').toLowerCase();
+  return terms.some(term => hay.includes(String(term).toLowerCase()));
+}
+
+function estimateJudgementFromItem(item) {
+  const score = getItemScore(item);
+  const cautions = splitTextList(item.match_cautions || []);
+  const titleText = [
+    item.title, item.granttype, item.system_name, item.institution_name,
+    item.detail_plain, item.subsidy_catch_phrase, cautions.join(' '),
+  ].join(' ');
+  const status = String(item.status || '').toLowerCase();
+
+  let riskLevel = 'low';
+  if (status === 'closed' || (score !== null && score < 40) || textHasAny(titleText, ['対象外', '地域不一致', '締切済み'])) {
+    riskLevel = 'high';
+  } else if (
+    status === 'unknown' || status === 'upcoming' ||
+    cautions.length || (score !== null && score < 70) ||
+    textHasAny(titleText, ['要確認', '企業単独', '大学・研究者経由'])
+  ) {
+    riskLevel = 'medium';
+  }
+  const riskLabel = riskLevel === 'high' ? '高' : (riskLevel === 'medium' ? '中' : '低');
+  const riskCls = riskLevel === 'high' ? 'high' : (riskLevel === 'medium' ? 'mid' : 'low');
+
+  let diffScore = 2;
+  const maxLimit = Number(item.subsidy_max_limit || 0);
+  if (maxLimit >= 100000000) diffScore += 2;
+  else if (maxLimit >= 30000000) diffScore += 1;
+  if (textHasAny(titleText, ['NEDO', 'SBIR', 'AMED', 'GAPファンド', '委託', 'コンソーシアム', '共同', '大学・研究者経由'])) diffScore += 1;
+  if (cautions.length >= 3) diffScore += 1;
+  if (status === 'unknown') diffScore += 1;
+  diffScore = Math.max(1, Math.min(5, diffScore));
+  const diffLabel = ({1:'低', 2:'やや低', 3:'中', 4:'やや高', 5:'高'})[diffScore] || '中';
+
+  const prepMap = {
+    1: {label:'1〜2週間', cls:'short'},
+    2: {label:'2〜3週間', cls:'short'},
+    3: {label:'3〜5週間', cls:'mid'},
+    4: {label:'1〜2か月', cls:'long'},
+    5: {label:'2か月以上', cls:'long'},
+  };
+  const prep = prepMap[diffScore] || prepMap[3];
+
+  let expertLevel = 'optional';
+  if (diffScore >= 5 || riskLevel === 'high' || textHasAny(titleText, ['大学・研究者経由', '企業単独', 'AMED', 'NEDO', 'SBIR', 'GAPファンド'])) {
+    expertLevel = diffScore >= 5 || riskLevel === 'high' ? 'high' : 'recommended';
+  } else if (diffScore >= 3 || cautions.length) {
+    expertLevel = 'recommended';
+  }
+
+  return {
+    exclusion_risks: [{label: riskLabel, level: riskLevel}],
+    difficulty: {score: diffScore, label: diffLabel},
+    prep_load: {label: prep.label, cls: prep.cls},
+    expert_needed: {level: expertLevel},
+  };
+}
+
+function judgementBadgesHtml(item) {
+  const j = estimateJudgementFromItem(item);
+  const risk = summarizeRiskLevel(j.exclusion_risks);
+  const diff = j.difficulty || {};
+  const prep = j.prep_load || {};
+  const expert = j.expert_needed || {};
+  return `
+    <div class="judgement-badges" data-role="judgement-badges">
+      <span class="j-badge j-badge--risk j-badge--risk-${escapeHtml(risk.cls)}" data-j="risk">🚫 対象外リスク：${escapeHtml(risk.label)}</span>
+      <span class="j-badge j-badge--diff j-badge--diff-s${escapeHtml(diff.score || 'unknown')}" data-j="diff">🪜 申請難易度：${escapeHtml(diff.label || '要確認')}</span>
+      <span class="j-badge j-badge--prep j-badge--prep-${escapeHtml(prep.cls || 'unknown')}" data-j="prep">⏳ 準備期間：${escapeHtml(prep.label || '要確認')}</span>
+      <span class="j-badge j-badge--expert j-badge--expert-${escapeHtml(expert.level || 'unknown')}" data-j="expert">🙋 専門家相談：${escapeHtml(expertLevelLabel(expert.level))}</span>
+    </div>
+  `;
+}
+
+function updateJudgementBadges(card, data) {
+  if (!card || !data) return;
+  const s = (data && data.summary) ? data.summary : data;
+  const risk = summarizeRiskLevel(s.exclusion_risks);
+  const diff = s.difficulty || {};
+  const prep = s.prep_load || {};
+  const expert = s.expert_needed || {};
+  const setText = (key, text, cls) => {
+    const el = card.querySelector(`[data-j="${key}"]`);
+    if (!el) return;
+    el.textContent = text;
+    if (cls) el.className = `j-badge j-badge--${key} j-badge--${key}-${cls}`;
+  };
+  setText('risk', `🚫 対象外リスク：${risk.label}`, risk.cls);
+  setText('diff', `🪜 申請難易度：${diff.label || '要確認'}`, diff.score ? `s${diff.score}` : 'unknown');
+  setText('prep', `⏳ 準備期間：${prep.label || '要確認'}`, prep.cls || 'unknown');
+  setText('expert', `🙋 専門家相談：${expertLevelLabel(expert.level)}`, expert.level || 'unknown');
+}
+
 function renderSummaryHtml(data) {
   const s = data.summary || data;
   const srcLabel = getSummarySourceLabel(data.summary_source || s.summary_source);
 
-  function sec(icon, label, content) {
-    if (!content) return '';
-    return `<div class="sum-section"><div class="sum-section-head">${icon} ${escapeHtml(label)}</div>${content}</div>`;
+  function isUnknownValue(val) {
+    const text = String(val ?? '').trim();
+    return !text || text === '要確認' || text === 'unknown';
   }
 
-  function textVal(val) {
-    const text = String(val || '');
-    return (!text || text === '要確認' || text === 'unknown') ? '' : text;
+  function toItems(value) {
+    const raw = Array.isArray(value) ? value : [value];
+    const items = raw.map(v => String(v ?? '').trim()).filter(Boolean);
+    return items.length ? items : ['要確認'];
   }
 
-  function listItems(arr) {
-    const items = (arr && arr.length) ? arr : ['要確認'];
-    if (items.length === 1 && items[0] === '要確認') return '';
-    return `<ul class="sum-list">${items.map(v => `<li>${escapeHtml(String(v))}</li>`).join('')}</ul>`;
+  function row(label, value) {
+    const items = toItems(value);
+    const isUnknown = items.length === 1 && isUnknownValue(items[0]);
+    const listClass = isUnknown ? ' class="sum-unknown"' : '';
+    const displayItems = isUnknown ? ['要確認'] : items;
+    return `<div class="sum-row"><span class="sum-label">${escapeHtml(label)}</span><ul${listClass}>${displayItems.map(v => `<li>${escapeHtml(v)}</li>`).join('')}</ul></div>`;
   }
 
-  function tag(icon, val) {
-    const text = textVal(val);
-    return text ? `<span class="sum-tag">${icon} ${escapeHtml(text)}</span>` : '';
-  }
-
-  const budgetTags = parseBudget(s.budget).map(t => `<span class="sum-tag">💰 ${escapeHtml(t)}</span>`).join('');
-  const dlText = formatDeadline(s.deadline);
   const phaseLabel = RD_PHASE_LABELS[s.rd_phase] || '';
-  const tags = [
-    budgetTags,
-    dlText     ? `<span class="sum-tag">📅 ${escapeHtml(dlText)}</span>`          : '',
-    phaseLabel ? `<span class="sum-tag">🔬 フェーズ：${escapeHtml(phaseLabel)}</span>` : '',
-  ].filter(Boolean).join('');
+  const deadlineText = formatDeadline(s.deadline) || s.deadline;
 
-  const rows = [
+  return [
     `<div class="sum-source">生成元: ${escapeHtml(srcLabel)}</div>`,
-    textVal(s.overview) ? `<div class="sum-overview">${escapeHtml(textVal(s.overview))}</div>` : '',
-    textVal(s.purpose)  ? `<div class="sum-purpose">${escapeHtml(textVal(s.purpose))}</div>`   : '',
-    tags ? `<div class="sum-tags">${tags}</div>` : '',
-    sec('✅', 'こんな会社に合いそう',        listItems(getArr(s, 'suitable_for'))),
-    sec('⚠️', '合わないかもしれない会社',    listItems(getArr(s, 'not_suitable_for'))),
-    sec('👥', '誰が応募できる？',            listItems(getArr(s, 'target_companies', 'target_conditions'))),
-    sec('💡', '何に使えるお金？',            listItems(getArr(s, 'eligible_expenses'))),
-    sec('📋', '用意するもの',                listItems(getArr(s, 'required_documents'))),
-    sec('✏️', 'まずやること',               listItems(getArr(s, 'preparation_tasks', 'application_steps'))),
-    sec('🙋', '相談するならこの人',          listItems(getArr(s, 'expert_type_needed'))),
-    sec('❓', '確認しておきたいこと',        listItems(getArr(s, 'first_questions_to_ask'))),
-    sec('⚡', '気をつけること',              listItems(getArr(s, 'cautions'))),
-  ];
-  const body = rows.filter(Boolean).join('');
-  const fallback = body ? '' : '<p class="sum-soft-unknown">詳細は公式要領でご確認ください。</p>';
-  return body + fallback;
+    row('概要', s.overview),
+    row('目的', s.purpose),
+    row('研究フェーズ', phaseLabel || s.rd_phase),
+    row('分野', getArr(s, 'fields')),
+    row('予算', parseBudget(s.budget)),
+    row('締切', deadlineText),
+    row('こんな会社に合いそう', getArr(s, 'suitable_for')),
+    row('合わないかもしれない会社', getArr(s, 'not_suitable_for')),
+    row('誰が応募できる？', getArr(s, 'target_companies', 'target_conditions')),
+    row('何に使えるお金？', getArr(s, 'eligible_expenses')),
+    row('用意するもの', getArr(s, 'required_documents')),
+    row('まずやること', getArr(s, 'preparation_tasks', 'application_steps')),
+    row('相談するならこの人', getArr(s, 'expert_type_needed')),
+    row('確認しておきたいこと', getArr(s, 'first_questions_to_ask')),
+    row('気をつけること', getArr(s, 'cautions')),
+  ].join('');
 }
 
 async function initMeta(){
@@ -176,39 +336,154 @@ function humanizeReason(r) {
   const budget = r.match(/補助上限\s*([\d,]+)円/);
   if (budget) return `最大${formatYen(parseInt(budget[1].replace(/,/g, ''), 10))}まで使える可能性があります`;
   const region = r.match(/^(.+?)\s*対象$/);
-  if (region) return `${region[1]}の事業者が対象です`;
+  if (region) return `${region[1]}の事業者が対象となる可能性があります`;
   return r;
+}
+
+function getItemScore(item) {
+  const raw = item.match_score ?? item.fit_percent;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function scoreBand(score) {
+  if (score === null) {
+    return {
+      tone: 'unknown',
+      label: '要確認',
+      guide: '条件が読み取りきれていない候補です。公式情報で対象条件を確認してください。',
+      color: '#8a7a70',
+    };
+  }
+  if (score >= 90) return {tone: 'excellent', label: 'かなり有望', guide: '応募できる可能性が高い候補です。締切と対象経費をすぐ確認したいです。', color: '#248a5a'};
+  if (score >= 80) return {tone: 'high', label: '応募候補', guide: '応募を前向きに検討できる候補です。要件の細部を見にいきましょう。', color: '#2f9a72'};
+  if (score >= 70) return {tone: 'good', label: '要件確認', guide: 'かなり近いですが、企業対象・対象経費・フェーズの確認が必要です。', color: '#6aa84f'};
+  if (score >= 60) return {tone: 'mid', label: '可能性あり', guide: '使える可能性はあります。ズレている条件がないか慎重に見たい候補です。', color: '#d19a2e'};
+  if (score >= 50) return {tone: 'watch', label: '注意して検討', guide: '参考候補です。条件が一部合わない可能性があります。', color: '#d9822b'};
+  if (score >= 40) return {tone: 'low', label: '参考候補', guide: '制度の方向性は近いかもしれませんが、応募候補としては弱めです。', color: '#c86143'};
+  if (score >= 30) return {tone: 'far', label: '遠い', guide: '条件との距離が大きい候補です。見るなら参考程度です。', color: '#b94a48'};
+  if (score >= 20) return {tone: 'very-low', label: 'かなり遠い', guide: '応募対象から外れる可能性が高い候補です。', color: '#9f3f46'};
+  return {tone: 'bad', label: '対象外寄り', guide: '今回の条件では応募候補にしにくいです。', color: '#7f3842'};
+}
+
+function scoreText(item) {
+  const score = getItemScore(item);
+  const band = scoreBand(score);
+  return score === null ? `一致度 ${band.label}` : `一致度 ${score}%・${band.label}`;
+}
+
+function statusLabel(status) {
+  const raw = String(status || '').toLowerCase();
+  if (raw === 'open') return '募集中';
+  if (raw === 'upcoming') return '募集前';
+  if (raw === 'closed') return '締切済み';
+  return '募集時期 要確認';
+}
+
+function sourceMixText(counts) {
+  return `Jグランツ ${counts.jgrants_items||0} / NEDO ${counts.nedo_items||0} / JST ${counts.jst_items||0} / AMED ${counts.amed_items||0} / アクセラ・GAP ${counts.accelerator_items||0}`;
+}
+
+function scoreGuideHtml(item) {
+  const score = getItemScore(item);
+  const band = scoreBand(score);
+  const width = score === null ? 8 : score;
+  return `
+    <div class="score-guide" aria-label="一致度の目安">
+      <div class="score-guide__bar"><span class="score-guide__fill" style="width:${width}%;background:${band.color}"></span></div>
+      <div class="score-guide__text">${escapeHtml(band.guide)}</div>
+    </div>
+  `;
+}
+
+function resultSummaryText(item) {
+  const score = getItemScore(item);
+  const band = scoreBand(score);
+  if (score !== null && score < 60) return band.guide;
+  return item.match_summary || item.detail_plain || item.subsidy_catch_phrase || '詳細は公式ページを確認してください。';
+}
+
+function importantChecksForItem(item) {
+  const checks = splitTextList(item.match_cautions || []);
+  const score = getItemScore(item);
+  const status = String(item.status || '').toLowerCase();
+  if (status === 'upcoming') checks.push('募集開始前、または次回募集待ちの可能性があります');
+  if (status === 'unknown') checks.push('募集状況と締切を公式ページで確認してください');
+  if (!officialUrlForItem(item)) checks.push('公式ページへのリンクが未確認です');
+  if (score !== null && score < 60) checks.push(scoreBand(score).guide);
+  if (score !== null && score >= 60 && score < 78) checks.push('企業対象・対象経費・フェーズの3点を先に確認してください');
+  return uniqText(checks).slice(0, 5);
+}
+
+function renderChecksHtml(item) {
+  const checks = importantChecksForItem(item);
+  if (!checks.length) return '';
+  return `
+    <div class="match-cautions">
+      <p class="match-cautions-head">確認事項</p>
+      <ul>${checks.map(v => `<li>${escapeHtml(v)}</li>`).join('')}</ul>
+    </div>
+  `;
+}
+
+const CLIENT_NEGATIVE_SECTOR_TERMS = {
+  medical: ['医療', '医療機関', '病院', '小児科', '診療', '臨床', '患者', '医療dx', '医療ＤＸ', '医療DX', '診断', '治療', 'medical', 'hospital', 'clinical'],
+  drug_discovery: ['創薬', '医薬', '医薬品', '薬剤', 'drug discovery', 'pharma', 'pharmaceutical'],
+};
+
+function applyClientResultGuards(items, params={}) {
+  const negativeSectors = new Set(params.negative_sectors || []);
+  if (!negativeSectors.size) return items || [];
+  return (items || []).filter(item => {
+    const text = [
+      item.title, item.institution_name, item.system_name, item.subsidy_catch_phrase,
+      item.detail_plain, item.detail, item.match_summary, item.granttype,
+    ].map(v => String(v || '').toLowerCase()).join(' ');
+    for (const sector of negativeSectors) {
+      const terms = CLIENT_NEGATIVE_SECTOR_TERMS[sector] || [];
+      if (terms.some(term => text.includes(term.toLowerCase()))) return false;
+    }
+    return true;
+  });
 }
 
 function renderItems(items) {
   const root = $('#results');
   if (!items.length) {
-    root.innerHTML = '<div class="result-card">候補が見つかりませんでした。条件を広げるか、地域・金額帯を未指定にしてください。</div>';
+    root.innerHTML = '<div class="result-card">厳しめに見ると候補が見つかりませんでした。予算帯を広げるか、自由記述で技術内容を少し詳しく入れてください。</div>';
     return;
   }
   const INITIAL_LIMIT = 5;
   function renderCards(list) {
-    return list.map(item => `
+    return list.map(item => {
+      const officialUrl = officialUrlForItem(item);
+      const score = getItemScore(item);
+      const band = scoreBand(score);
+      return `
       <article class="result-card" data-id="${escapeHtml(item.id)}">
         <h3>${escapeHtml(item.title)}</h3>
         <div class="meta">
           <span class="pill">${escapeHtml(item.institution_name || item.system_name || item.source || '制度')}</span>
-          <span class="pill pill--score">一致度 ${escapeHtml(item.match_score ?? item.fit_percent ?? '-')}%</span>
-          <span class="pill">${escapeHtml(item.status || '要確認')}</span>
+          <span class="pill pill--score score-pill score-pill--${escapeHtml(band.tone)}">${escapeHtml(scoreText(item))}</span>
+          <span class="pill">${escapeHtml(statusLabel(item.status))}</span>
           <span class="pill">${escapeHtml(item.budget_scale_label || '')}</span>
         </div>
-        <p>${escapeHtml(item.match_summary || item.detail_plain || item.subsidy_catch_phrase || '詳細は公式ページを確認してください。')}</p>
+        ${scoreGuideHtml(item)}
+        ${judgementBadgesHtml(item)}
+        <p>${escapeHtml(resultSummaryText(item))}</p>
         ${(item.match_reasons||[]).length ? `<div class="match-reasons"><p class="match-reasons-head">なぜおすすめ？</p><ul>${(item.match_reasons||[]).flatMap(r=>r.split(' / ')).slice(0,5).map(r=>`<li>${escapeHtml(humanizeReason(r))}</li>`).join('')}</ul></div>` : ''}
-        ${(item.match_cautions||[]).length ? `<p><strong>要確認:</strong> ${escapeHtml((item.match_cautions||[]).join(' / '))}</p>` : ''}
+        ${renderChecksHtml(item)}
         <div class="result-actions">
+          <a class="button button--small button--primary-warm" data-detail-link href="/detail.html?id=${encodeURIComponent(item.id)}">応募判断の詳細を見る</a>
           <button class="button button--small" data-action="summary">やさしく読む</button>
           <button class="button button--small" data-action="watch">ウォッチに保存</button>
           <button class="button button--small" data-action="consult">専門家に相談</button>
-          ${item.safe_public_url ? `<a class="button button--small" href="${escapeHtml(item.safe_public_url)}" target="_blank" rel="noopener">公式ページ</a>` : ''}
+          ${officialUrl ? `<a class="button button--small" href="${escapeHtml(officialUrl)}" rel="noopener">公式ページ</a>` : ''}
         </div>
         <div class="details" hidden></div>
       </article>
-    `).join('');
+    `}).join('');
   }
   root.innerHTML = renderCards(items.slice(0, INITIAL_LIMIT));
   if (items.length > INITIAL_LIMIT) {
@@ -225,10 +500,12 @@ async function search(e){
   $('#resultMeta').textContent = '検索中です...';
   $('#results').innerHTML = '';
   try{
-    const data = await api('/api/rd-search', {method:'POST', body:JSON.stringify(formPayload(e.target))});
-    lastItems = data.items || [];
-    const counts = data.source_counts || {};
-    $('#resultMeta').textContent = `${lastItems.length}件の候補を表示中。Jグランツ ${counts.jgrants_items||0} / NEDO ${counts.nedo_items||0} / JST ${counts.jst_items||0} / AMED ${counts.amed_items||0}`;
+    const payload = formPayload(e.target);
+    const data = await api('/api/rd-search', {method:'POST', body:JSON.stringify(payload)});
+    lastItems = applyClientResultGuards(data.items || [], payload);
+    const counts = data.source_mix || data.source_counts || {};
+    $('#resultMeta').textContent = `${lastItems.length}件の候補を表示中。${sourceMixText(counts)}`;
+    saveSearchState(lastItems, $('#resultMeta').textContent, payload);
     renderItems(lastItems);
   }catch(err){ $('#resultMeta').textContent = '検索に失敗しました: '+err.message; }
 }
@@ -249,6 +526,7 @@ async function onResultClick(e){
     try{
       const data = await api('/api/grant-summary?id='+encodeURIComponent(id));
       box.innerHTML = renderSummaryHtml(data);
+      updateJudgementBadges(card, data);
     }catch(err){ box.textContent = '要約取得に失敗しました: '+err.message; }
   }
 }
@@ -256,17 +534,20 @@ async function onResultClick(e){
 function renderWatchlist(){
   const items = getWatchlist();
   $('#resultMeta').textContent = `ウォッチリスト ${items.length}件`;
-  $('#results').innerHTML = items.length ? items.map(item => `
+  $('#results').innerHTML = items.length ? items.map(item => {
+    const band = scoreBand(getItemScore(item));
+    return `
     <article class="result-card" data-id="${escapeHtml(item.id)}">
       <h3>${escapeHtml(item.title)}</h3>
-      <div class="meta"><span class="pill">${escapeHtml(item.institution_name||'保存済み')}</span><span class="pill pill--score">${escapeHtml(item.match_score ?? '-')}%</span></div>
+      <div class="meta"><span class="pill">${escapeHtml(item.institution_name||'保存済み')}</span><span class="pill pill--score score-pill score-pill--${escapeHtml(band.tone)}">${escapeHtml(scoreText(item))}</span></div>
       <div class="result-actions">
         <button class="button button--small" data-action="summary">やさしく読む</button>
         <button class="button button--small" onclick="removeWatch('${escapeHtml(item.id)}'); renderWatchlist();">削除</button>
         <button class="button button--small" data-action="consult">専門家に相談</button>
       </div>
       <div class="details" hidden></div>
-    </article>`).join('') : '<div class="result-card">まだ保存された公募はありません。</div>';
+    </article>`;
+  }).join('') : '<div class="result-card">まだ保存された公募はありません。</div>';
 }
 
 async function runBulk(path){
@@ -312,7 +593,9 @@ const FALLBACK_OPTIONS = {
   ],
   tech_domain: [
     {value:'ai',           label:'AI・ソフトウェア'},
-    {value:'bio',          label:'バイオ・医療'},
+    {value:'medical',      label:'医療・医療機器'},
+    {value:'bio',          label:'バイオ・創薬'},
+    {value:'healthcare',   label:'ヘルスケア'},
     {value:'energy',       label:'エネルギー・GX'},
     {value:'materials',    label:'材料・化学'},
     {value:'robotics',     label:'ロボティクス・製造'},
@@ -326,6 +609,11 @@ const FALLBACK_OPTIONS = {
     {value:'equipment',   label:'設備導入も含めたい'},
     {value:'startup',     label:'スタートアップ向けを優先'},
     {value:'grant_only',  label:'補助金・助成金を優先'},
+    {value:'accelerator', label:'アクセラ・自治体実証も見たい'},
+    {value:'activity_fund', label:'活動資金・協業費も見たい'},
+    {value:'gap_fund', label:'GAPファンドも見たい'},
+    {value:'deeptech_startup', label:'NEDO・SBIR系も見たい'},
+    {value:'municipality_poc', label:'自治体PoC・実証も見たい'},
     {value:'ip',          label:'知財・特許を取りたい'},
   ],
   budget_range: [
@@ -345,13 +633,13 @@ const REGION_OPTIONS = [
 ];
 
 const STEPS = [
-  {key:'rd_phase',    metaKey:'rd_phases',       question:'研究開発のフェーズはどのあたりですか？',  placeholder:'例：PoC段階、試作を終えたところ'},
-  {key:'tech_domain', metaKey:'tech_domains',    question:'技術・分野を教えてください。',           placeholder:'例：AIを使った医療診断ツール'},
-  {key:'support_type',metaKey:'support_types',   question:'どのような支援を探していますか？',       placeholder:'例：試作費用を補助してほしい'},
-  {key:'budget_range',metaKey:'budget_ranges',   question:'希望する資金規模はどのくらいですか？',   placeholder:'例：1000万円程度、大きいほど良い'},
-  {key:'region_text', staticOptions:REGION_OPTIONS, question:'事業拠点の地域を教えてください。',    placeholder:'例：神奈川県横浜市、北海道'},
+  {key:'rd_phase',    metaKey:'rd_phases',       question:'まずは今の研究開発の段階を教えてください。',  placeholder:'例：PoC段階、試作を終えたところ'},
+  {key:'tech_domain', metaKey:'tech_domains',    question:'どんな技術・分野のテーマですか？近いものを選んでください。',           placeholder:'例：AIを使った医療診断ツール'},
+  {key:'support_type',metaKey:'support_types',   question:'今いちばん助けてほしいことはどれに近いですか？',       placeholder:'例：試作費用を補助してほしい'},
+  {key:'budget_range',metaKey:'budget_ranges',   question:'希望する資金規模は、ざっくりどのくらいですか？',   placeholder:'例：1000万円程度、大きいほど良い'},
+  {key:'region_text', staticOptions:REGION_OPTIONS, question:'事業拠点の地域も見ておきます。近い地域を選んでください。',    placeholder:'例：神奈川県横浜市、北海道'},
   {key:'free_text', isFinal:true, skipLabel:'このまま検索する',
-   question:'最後に、自社の状況や探している資金について補足があれば教えてください。（任意）',
+   question:'最後に、りこに伝えておきたい補足があればどうぞ。（任意）',
    placeholder:'例：大学発スタートアップで試作費と人件費に使える補助金を探しています。'},
 ];
 
@@ -361,16 +649,26 @@ let chatMeta = {};
 let chatParams = {};
 let chatStep = 0;
 let chatFreeNotes = [];
+let proposedPayload = null;
+
+function beginDirectConversation() {
+  freezeChips();
+  $('#chatMessages').innerHTML = '';
+  $('#chatInput').hidden = true;
+  const progress = $('#chatProgress');
+  if (progress) progress.textContent = '';
+}
 
 function resetChatState() {
   chatParams = {
     rd_phase: '', tech_domain: '', support_type: 'any',
     budget_range: '', region_text: '', free_text: '',
-    sources: ['jgrants', 'nedo', 'jst', 'amed'],
+    sources: ['jgrants', 'nedo', 'jst', 'amed', 'accelerators'],
     fast_mode: true,
   };
   chatStep = 0;
   chatFreeNotes = [];
+  proposedPayload = null;
 }
 
 function getChipOptions(step) {
@@ -380,7 +678,17 @@ function getChipOptions(step) {
   return FALLBACK_OPTIONS[step.key] || [];
 }
 
-function appendChatMsg(role, text, chips) {
+function stepChoiceHint(step) {
+  if (step.isFinal) return '補足がなければ、このまま検索できます。';
+  return '近いものを選んでください。なければ下に書けます。';
+}
+
+function stepInputHint(step) {
+  if (step.isFinal) return '補足があれば入力してください。';
+  return '選択肢にないときだけ入力してください。';
+}
+
+function appendChatMsg(role, text, chips, hint) {
   const container = $('#chatMessages');
   const msg = document.createElement('div');
   msg.className = `chat-msg chat-msg--${role}`;
@@ -389,6 +697,12 @@ function appendChatMsg(role, text, chips) {
   bubble.textContent = text;
   msg.appendChild(bubble);
   if (chips && chips.length) {
+    if (hint) {
+      const help = document.createElement('p');
+      help.className = 'chat-choice-hint';
+      help.textContent = hint;
+      msg.appendChild(help);
+    }
     const row = document.createElement('div');
     row.className = 'chat-chips';
     chips.forEach(opt => {
@@ -427,8 +741,10 @@ function showChatStep() {
       ? {value: '__skip__', label: step.skipLabel, skip: true}
       : {value: '__skip__', label: 'スキップ', skip: true},
   ];
-  appendChatMsg('bot', step.question, chips);
+  appendChatMsg('bot', step.question, chips, stepChoiceHint(step));
   const input = $('#chatTextInput');
+  const hint = $('#chatInputHint');
+  if (hint) hint.textContent = stepInputHint(step);
   input.placeholder = step.placeholder || '自由に入力...';
   $('#chatInput').hidden = false;
   setTimeout(() => input.focus(), 50);
@@ -472,17 +788,18 @@ async function startChatSearch() {
   if (chatFreeNotes.length) {
     chatParams.free_text = [chatParams.free_text, chatFreeNotes.join(' / ')].filter(Boolean).join(' / ');
   }
-  appendChatMsg('bot', '条件が揃いました。検索しています…');
+  appendChatMsg('bot', '条件が整いました。りこが近い候補を探しています…');
   $('#resultMeta').textContent = '検索中です...';
   $('#results').innerHTML = '';
   setTimeout(() => document.querySelector('.layout')?.scrollIntoView({behavior: 'smooth', block: 'start'}), 500);
   try {
     const data = await api('/api/rd-search', {method: 'POST', body: JSON.stringify(chatParams)});
-    lastItems = data.items || [];
-    const c = data.source_counts || {};
-    $('#resultMeta').textContent = `${lastItems.length}件の候補を表示中。Jグランツ ${c.jgrants_items||0} / NEDO ${c.nedo_items||0} / JST ${c.jst_items||0} / AMED ${c.amed_items||0}`;
+    lastItems = applyClientResultGuards(data.items || [], chatParams);
+    const c = data.source_mix || data.source_counts || {};
+    $('#resultMeta').textContent = `${lastItems.length}件の候補を表示中。${sourceMixText(c)}`;
+    saveSearchState(lastItems, $('#resultMeta').textContent, chatParams);
     renderItems(lastItems);
-    appendChatMsg('bot', `${lastItems.length}件の候補が見つかりました。下にスクロールしてご確認ください。`,
+    appendChatMsg('bot', `${lastItems.length}件の候補が見つかりました。下に、りこが見つけた候補を並べました。`,
       [{value: '__reset__', label: '条件を変えて再検索', skip: true}]);
   } catch (err) {
     $('#resultMeta').textContent = '検索に失敗しました: ' + err.message;
@@ -491,7 +808,231 @@ async function startChatSearch() {
   }
 }
 
+function useDirectPayload(payload, message, options={}) {
+  if (!options.preserveChat) beginDirectConversation();
+  chatParams = {
+    rd_phase: '', tech_domain: '', support_type: 'any',
+    budget_range: '', region_text: '', free_text: '',
+    sources: ['jgrants', 'nedo', 'jst', 'amed', 'accelerators'],
+    fast_mode: true,
+    ...(payload || {}),
+  };
+  chatFreeNotes = [];
+  chatStep = STEPS.length;
+  if (message) appendChatMsg('user', message);
+  startChatSearch();
+}
+
+async function runQuickSearch() {
+  const input = $('#quickSearchText');
+  const text = (input && input.value || '').trim();
+  if (!text) return;
+  const extracted = extractUrlAndNotes(text);
+  if (extracted.url) {
+    await proposeFromCompanyUrl({
+      inputText: text,
+      url: extracted.url,
+      needText: extracted.needText,
+      autoSearch: true,
+    });
+    return;
+  }
+  useDirectPayload({ free_text: text, negative_sectors: inferNegativeSectorsFromText(text) }, text);
+}
+
+function normalizeCompanyUrlInput(value) {
+  const raw = (value || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (/^[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:\/.*)?$/.test(raw)) return `https://${raw}`;
+  return raw;
+}
+
+function extractUrlAndNotes(value) {
+  const raw = (value || '').trim();
+  const match = raw.match(/https?:\/\/[^\s　]+|(?:www\.)?[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(?:\/[^\s　]*)?/i);
+  if (!match) return {url: '', needText: raw};
+  const originalUrl = match[0];
+  const cleanedUrl = originalUrl.replace(/[、。，．,.)）\]】]+$/g, '');
+  const url = normalizeCompanyUrlInput(cleanedUrl);
+  const needText = raw.replace(originalUrl, ' ').replace(/\s+/g, ' ').trim();
+  return {url, needText};
+}
+
+function fallbackCompanyPayload(url, needText='') {
+  return {
+    rd_phase: '', tech_domain: '', support_type: 'development',
+    budget_range: '', region_text: '', free_text: [plusLabel('会社URL', url), needText].filter(Boolean).join('\n'),
+    sources: ['jgrants', 'nedo', 'jst', 'amed', 'accelerators'],
+    negative_sectors: inferNegativeSectorsFromText(needText),
+    fast_mode: true,
+  };
+}
+
+function plusLabel(label, value) {
+  return value ? `${label}: ${value}` : '';
+}
+
+function inferBudgetRangeFromText(text) {
+  const normalized = String(text || '').replace(/,/g, '').toLowerCase();
+  if (/\d+(?:\.\d+)?\s*(?:万|万円)?\s*[〜~～-]\s*\d+(?:\.\d+)?\s*億/.test(normalized)) return '30m_100m';
+  const oku = normalized.match(/(\d+(?:\.\d+)?)\s*億/);
+  if (oku) return Number(oku[1]) >= 1 ? 'over100m' : '30m_100m';
+  const man = normalized.match(/(\d+(?:\.\d+)?)\s*万/);
+  if (man) {
+    const yen = Number(man[1]) * 10000;
+    if (yen >= 100000000) return 'over100m';
+    if (yen >= 30000000) return '30m_100m';
+    if (yen >= 5000000) return '5m_30m';
+    return 'under5m';
+  }
+  const yen = normalized.match(/(\d{7,})\s*(?:円|yen)?/);
+  if (yen) {
+    const amount = Number(yen[1]);
+    if (amount >= 100000000) return 'over100m';
+    if (amount >= 30000000) return '30m_100m';
+    if (amount >= 5000000) return '5m_30m';
+    return 'under5m';
+  }
+  return '';
+}
+
+function inferNegativeSectorsFromText(text) {
+  const raw = String(text || '');
+  const hits = [];
+  if (/医療(?:系|関連|dx|DX)?(?:は|を|も)?(?:除|外|いらない|不要|避け)/.test(raw) || /病院(?:向け|関連)?(?:は|を|も)?(?:除|外|いらない|不要|避け)/.test(raw) || /(?:exclude|no|avoid)\s+(?:medical|hospital|clinical)/i.test(raw)) {
+    hits.push('medical');
+  }
+  if (/創薬(?:は|を|も)?(?:除|外|いらない|不要|避け)/.test(raw) || /医薬(?:品)?(?:は|を|も)?(?:除|外|いらない|不要|避け)/.test(raw) || /(?:exclude|no|avoid)\s+(?:drug|pharma|drug discovery)/i.test(raw)) {
+    hits.push('drug_discovery');
+  }
+  if (hits.includes('medical') && /ヘルスケア|healthcare|腸内環境|腸内細菌|腸内フローラ|マイクロバイオーム|microbiome|未病|予防/i.test(raw)) {
+    hits.push('drug_discovery');
+  }
+  return Array.from(new Set(hits));
+}
+
+function refineCompanyPayloadFromSummary(payload, summary, needText='') {
+  const p = {...(payload || {})};
+  const text = `${summary || ''} ${p.free_text || ''} ${needText || ''}`.toLowerCase();
+  const raw = `${summary || ''} ${p.free_text || ''} ${needText || ''}`;
+  const agriStrong = [
+    '植物', '根', '土壌', '圃場', '作物', '栽培', '農業', '農・環境',
+    '食・農', '内生菌', 'エンドファイト', 'endophyte', '微生物', '共生',
+  ];
+  const healthcareStrong = [
+    'ヘルスケア', 'healthcare', '腸内環境', '腸内細菌', '腸内フローラ', '菌叢',
+    'マイクロバイオーム', 'microbiome', 'gut microbiome', '未病', '予防', '健康寿命',
+  ];
+  const foodStrong = ['代替肉', '培養肉', '機能性食品', '食品製造', '食品加工'];
+  const hasAgri = agriStrong.some(term => text.includes(term.toLowerCase()));
+  const hasHealthcare = healthcareStrong.some(term => text.includes(term.toLowerCase()));
+  const hasFoodOnly = foodStrong.some(term => text.includes(term.toLowerCase()));
+  const negativeSectors = Array.from(new Set([...(p.negative_sectors || []), ...inferNegativeSectorsFromText(raw)]));
+  if (negativeSectors.length) p.negative_sectors = negativeSectors;
+  if (hasHealthcare) {
+    p.tech_domain = 'healthcare';
+  }
+  if (hasAgri && !hasFoodOnly) {
+    p.tech_domain = 'agri';
+  }
+  const inferredBudget = inferBudgetRangeFromText(raw);
+  if (inferredBudget) p.budget_range = inferredBudget;
+  if (/アクセラ|アクセラレーター|自治体実証|実証支援/.test(raw)) p.support_type = 'accelerator';
+  if (/活動資金|協業費|支援金/.test(raw)) p.support_type = 'activity_fund';
+  if (/GAPファンド|ギャップファンド|gap fund/i.test(raw)) p.support_type = 'gap_fund';
+  if (/NEDO|STS|SBIR|DTSU|ディープテック/i.test(raw)) p.support_type = 'deeptech_startup';
+  if (/自治体PoC|自治体実証|実証フィールド|社会実験/.test(raw)) p.support_type = 'municipality_poc';
+  return p;
+}
+
+async function proposeFromCompanyUrl(options={}) {
+  const input = $('#quickSearchText');
+  const inputText = (options.inputText ?? (input && input.value) ?? '').trim();
+  const extracted = options.url
+    ? {url: options.url, needText: options.needText || ''}
+    : extractUrlAndNotes(inputText);
+  const url = extracted.url;
+  const needText = (options.needText ?? extracted.needText ?? '').trim();
+  const autoSearch = options.autoSearch !== false;
+  if (!url) {
+    appendChatMsg('bot', '会社URLを入れてください。例: https://example.co.jp');
+    return;
+  }
+  beginDirectConversation();
+  const btn = $('#companyUrlBtn');
+  const originalText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '読み取り中...'; }
+  $('#resultMeta').textContent = '会社URLから条件を下書きしています...';
+  appendChatMsg('user', inputText || url);
+  appendChatMsg('bot', '会社サイトを読んで、検索条件を下書きします…');
+  let data = null;
+  try {
+    data = await api('/api/company-profile', {method: 'POST', body: JSON.stringify({url, need_text: needText})});
+  } catch (err) {
+    data = {
+      payload: fallbackCompanyPayload(url, needText),
+      summary: '会社URLは受け取りました。サイト本文を読み取れなかったため、URLを手がかりに検索します。技術概要を追記すると精度が上がります。',
+      confidence: 'URLのみ',
+      needs_more_info: true,
+    };
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = originalText; }
+  }
+  try {
+    proposedPayload = refineCompanyPayloadFromSummary(data.payload || fallbackCompanyPayload(url, needText), data.summary || '', needText);
+    const labels = {
+      idea: 'アイデア・シーズ探索', poc: 'PoC・概念実証', prototype: '試作・開発',
+      demonstration: '実証・社会実装前', commercialization: '事業化・量産前',
+      ai: 'AI・ソフトウェア', medical: '医療・医療機器', bio: 'バイオ・創薬',
+      healthcare: 'ヘルスケア', agri: 'アグリテック', foodtech: 'フードテック',
+      energy: 'エネルギー・GX', materials: '材料・化学', robotics: 'ロボティクス・製造',
+      semiconductor: '半導体・電子', space: '宇宙', other: 'その他',
+      development: '研究・試作', validation: 'PoC・実証', equipment: '設備含む',
+      startup: 'スタートアップ向け', grant_only: '補助金・助成金',
+      accelerator: 'アクセラ・自治体実証', activity_fund: '活動資金・協業費',
+      gap_fund: 'GAPファンド', deeptech_startup: 'NEDO・SBIR系',
+      municipality_poc: '自治体PoC・実証',
+      under5m: '500万円未満', '5m_30m': '500万円〜3000万円',
+      '30m_100m': '3000万円〜1億円', over100m: '1億円以上',
+    };
+    const p = proposedPayload || {};
+    const signals = Array.isArray(data.detected_signals) && data.detected_signals.length
+      ? `\n読み取った手がかり: ${data.detected_signals.slice(0, 6).join('、')}`
+      : '';
+    const negativeLabels = {
+      medical: '医療・病院系',
+      drug_discovery: '創薬・医薬品系',
+    };
+    const negatives = Array.isArray(p.negative_sectors) && p.negative_sectors.length
+      ? ` / 除外: ${p.negative_sectors.map(v => negativeLabels[v] || v).join('、')}`
+      : '';
+    $('#resultMeta').textContent = '会社URLから条件案を作りました。';
+    appendChatMsg(
+      'bot',
+      `こう見立てました。技術分野: ${labels[p.tech_domain] || p.tech_domain || '要確認'} / 段階: ${labels[p.rd_phase] || p.rd_phase || '要確認'} / 予算: ${labels[p.budget_range] || p.budget_range || '未指定'}${negatives}`,
+      autoSearch
+        ? [{value: '__edit_profile__', label: '条件を修正する', skip: true}]
+        : [
+          {value: '__use_profile__', label: 'この条件で検索', skip: true},
+          {value: '__edit_profile__', label: '条件を修正する', skip: true},
+        ],
+      `${data.summary || ''}${signals}`
+    );
+    if (autoSearch) {
+      appendChatMsg('bot', 'この見立てで、候補を先に並べます。理由もカードに出します。');
+      useDirectPayload(proposedPayload, null, {preserveChat: true});
+    }
+  } catch (err) {
+    appendChatMsg('bot', err.message || 'URLを受け取れませんでした。自由記述で入力してください。');
+  }
+}
+
 function resetChat() {
+  clearSearchState();
+  lastItems = [];
+  $('#resultMeta').textContent = '条件を入れると、近い公募を並べます。';
+  $('#results').innerHTML = '';
   resetChatState();
   $('#chatMessages').innerHTML = '';
   $('#chatInput').hidden = false;
@@ -505,6 +1046,13 @@ async function initChat() {
 }
 
 document.addEventListener('click', e => {
+  const detailLink = e.target.closest('[data-detail-link]');
+  if (detailLink) {
+    detailLink.textContent = 'りこが読みに行ってます...';
+    detailLink.setAttribute('aria-busy', 'true');
+    detailLink.classList.add('button--loading');
+    return;
+  }
   const leadBtn = e.target.closest('[data-lead-type]');
   if(leadBtn) openLead(leadBtn.dataset.leadType);
 });
@@ -513,6 +1061,8 @@ $('#chatMessages').addEventListener('click', e => {
   if (!btn || btn.disabled) return;
   const val = btn.dataset.value;
   if (val === '__reset__') { resetChat(); return; }
+  if (val === '__use_profile__') { useDirectPayload(proposedPayload, 'この条件で検索', {preserveChat: true}); return; }
+  if (val === '__edit_profile__') { resetChat(); return; }
   answerChatStep(val, btn.textContent);
 });
 $('#chatSendBtn').addEventListener('click', () => {
@@ -522,6 +1072,8 @@ $('#chatSendBtn').addEventListener('click', () => {
   input.value = '';
   handleChatFreeInput(text);
 });
+$('#quickSearchBtn').addEventListener('click', runQuickSearch);
+$('#companyUrlBtn').addEventListener('click', proposeFromCompanyUrl);
 
 $('#results').addEventListener('click', onResultClick);
 $('#showWatchlist').addEventListener('click', renderWatchlist);
@@ -531,4 +1083,4 @@ $('#leadForm').addEventListener('submit', submitLead);
 $$('[data-dialog-close]').forEach(b => b.addEventListener('click', () => { const d = $('#leadDialog'); if (d.open) d.close(); }));
 $('#leadDialog').addEventListener('click', e => { if (e.target === $('#leadDialog') && $('#leadDialog').open) $('#leadDialog').close(); });
 $('#leadDialog').addEventListener('close', () => { $('#leadForm').reset(); $('#leadStatus').textContent = ''; });
-initChat();
+initChat().then(restoreSearchState);

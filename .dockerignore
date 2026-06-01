@@ -1,0 +1,12 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.DS_Store
+grant_mvp/grants.db
+grant_mvp/grants.db-journal
+grant_mvp/grants.db-wal
+grant_mvp/grants.db-shm
+images
+posts.csv
