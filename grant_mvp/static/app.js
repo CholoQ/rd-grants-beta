@@ -2,6 +2,7 @@ const $ = (sel, root=document) => root.querySelector(sel);
 const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 const watchKey = 'rdFundingWatchlist:v1';
 const searchStateKey = 'rdFundingSearchState:v1';
+const analyticsVisitorKey = 'rikoNaviVisitor:v1';
 let lastItems = [];
 
 const leadCopy = {
@@ -61,6 +62,35 @@ async function api(path, options={}){
   const data = await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || 'API error');
   return data;
+}
+
+function getAnalyticsVisitorId() {
+  try {
+    let id = localStorage.getItem(analyticsVisitorKey);
+    if (!id) {
+      id = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : `v-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      localStorage.setItem(analyticsVisitorKey, id);
+    }
+    return id;
+  } catch (_) {
+    return '';
+  }
+}
+
+function trackEvent(eventType, payload={}) {
+  try {
+    fetch('/api/track', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        event_type: eventType,
+        path: `${location.pathname}${location.hash || ''}`,
+        visitor_id: getAnalyticsVisitorId(),
+        payload,
+      }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch (_) {}
 }
 
 function fillSelect(id, options){
@@ -501,10 +531,12 @@ async function search(e){
   $('#results').innerHTML = '';
   try{
     const payload = formPayload(e.target);
+    trackEvent('search_submitted', {mode: 'form', sources: (payload.sources || []).join(',')});
     const data = await api('/api/rd-search', {method:'POST', body:JSON.stringify(payload)});
     lastItems = applyClientResultGuards(data.items || [], payload);
     const counts = data.source_mix || data.source_counts || {};
     $('#resultMeta').textContent = `${lastItems.length}件の候補を表示中。${sourceMixText(counts)}`;
+    trackEvent('search_results', {mode: 'form', result_count: String(lastItems.length)});
     saveSearchState(lastItems, $('#resultMeta').textContent, payload);
     renderItems(lastItems);
   }catch(err){ $('#resultMeta').textContent = '検索に失敗しました: '+err.message; }
@@ -516,12 +548,15 @@ async function onResultClick(e){
   const id = card.dataset.id;
   const item = lastItems.find(x => String(x.id)===String(id)) || getWatchlist().find(x => String(x.id)===String(id));
   if(btn.dataset.action === 'watch'){
+    trackEvent('watch_saved', {item_id: id});
     addWatch(item); btn.textContent = '保存しました'; return;
   }
   if(btn.dataset.action === 'consult'){
+    trackEvent('consult_opened', {item_id: id});
     openLead('consultation', item); return;
   }
   if(btn.dataset.action === 'summary'){
+    trackEvent('summary_opened', {item_id: id});
     const box = $('.details', card); box.hidden = false; box.textContent = '要点を取得中です...';
     try{
       const data = await api('/api/grant-summary?id='+encodeURIComponent(id));
@@ -793,10 +828,12 @@ async function startChatSearch() {
   $('#results').innerHTML = '';
   setTimeout(() => document.querySelector('.layout')?.scrollIntoView({behavior: 'smooth', block: 'start'}), 500);
   try {
+    trackEvent('search_submitted', {mode: 'chat', sources: (chatParams.sources || []).join(',')});
     const data = await api('/api/rd-search', {method: 'POST', body: JSON.stringify(chatParams)});
     lastItems = applyClientResultGuards(data.items || [], chatParams);
     const c = data.source_mix || data.source_counts || {};
     $('#resultMeta').textContent = `${lastItems.length}件の候補を表示中。${sourceMixText(c)}`;
+    trackEvent('search_results', {mode: 'chat', result_count: String(lastItems.length)});
     saveSearchState(lastItems, $('#resultMeta').textContent, chatParams);
     renderItems(lastItems);
     appendChatMsg('bot', `${lastItems.length}件の候補が見つかりました。下に、りこが見つけた候補を並べました。`,
@@ -1083,4 +1120,5 @@ $('#leadForm').addEventListener('submit', submitLead);
 $$('[data-dialog-close]').forEach(b => b.addEventListener('click', () => { const d = $('#leadDialog'); if (d.open) d.close(); }));
 $('#leadDialog').addEventListener('click', e => { if (e.target === $('#leadDialog') && $('#leadDialog').open) $('#leadDialog').close(); });
 $('#leadDialog').addEventListener('close', () => { $('#leadForm').reset(); $('#leadStatus').textContent = ''; });
+trackEvent('page_view');
 initChat().then(restoreSearchState);

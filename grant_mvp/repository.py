@@ -12,6 +12,7 @@ from .config import (
     ANTHROPIC_API_KEY, AUTO_REFRESH_MAX_AGE_HOURS, AUTO_REFRESH_ON_START, DB_PATH, GEMINI_API_KEY, GRANTS_SCHEMA,
     LEGAL_DISCLAIMER, OPENAI_API_KEY, SYNC_EVENTS_SCHEMA, LEADS_SCHEMA, GRANT_SUMMARIES_SCHEMA, FAST_MODE_DEFAULT,
     ENABLE_LIVE_FETCH_IN_FAST_MODE, ENABLE_LLM_PROFILE_IN_FAST_MODE, ENABLE_LLM_RERANK_IN_FAST_MODE, SNAPSHOT_DB_PATH,
+    ANALYTICS_EVENTS_SCHEMA,
 )
 from .utils import strip_html, utcnow
 from .status_utils import effective_status
@@ -42,6 +43,7 @@ def init_db() -> None:
         conn.execute(SYNC_EVENTS_SCHEMA)
         conn.execute(LEADS_SCHEMA)
         conn.execute(GRANT_SUMMARIES_SCHEMA)
+        conn.execute(ANALYTICS_EVENTS_SCHEMA)
     conn.close()
 
 
@@ -127,6 +129,101 @@ def upsert_grant_summary_cache(grant_id: str, summary: Dict[str, Any], source_te
         )
     conn.close()
     return {"ok": True, "grant_id": grant_id, "model": model, "updated_at": now}
+
+
+def _clean_analytics_text(value: Any, limit: int = 120) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"[\x00-\x1f\x7f]+", " ", text)
+    return text[:limit]
+
+
+def log_analytics_event(payload: Dict[str, Any]) -> Dict[str, Any]:
+    event_type = _clean_analytics_text(payload.get("event_type") or payload.get("type") or "event", 40)
+    if not re.match(r"^[a-zA-Z0-9_.:-]{1,40}$", event_type):
+        event_type = "event"
+    path = _clean_analytics_text(payload.get("path") or "/", 160)
+    visitor_id = _clean_analytics_text(payload.get("visitor_id") or "", 160)
+    visitor_hash = sha256(visitor_id.encode("utf-8")).hexdigest() if visitor_id else None
+    raw_detail = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+    safe_detail = {
+        _clean_analytics_text(k, 40): _clean_analytics_text(v, 120)
+        for k, v in (raw_detail or {}).items()
+        if k not in {"free_text", "query", "message", "email", "name", "phone"}
+    }
+    conn = db()
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO analytics_events (event_type, path, visitor_hash, payload, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (event_type, path, visitor_hash, json.dumps(safe_detail, ensure_ascii=False), utcnow()),
+        )
+    conn.close()
+    return {"ok": True}
+
+
+def get_analytics_summary(days: int = 30) -> Dict[str, Any]:
+    days = max(1, min(int(days or 30), 180))
+    conn = db()
+    since_expr = f"-{days - 1} days"
+    event_rows = conn.execute(
+        """
+        SELECT event_type, COUNT(*) AS count
+        FROM analytics_events
+        WHERE datetime(created_at) >= datetime('now', ?)
+        GROUP BY event_type
+        ORDER BY count DESC
+        """,
+        (since_expr,),
+    ).fetchall()
+    daily_rows = conn.execute(
+        """
+        SELECT date(created_at) AS day,
+               COUNT(CASE WHEN event_type = 'page_view' THEN 1 END) AS page_views,
+               COUNT(CASE WHEN event_type LIKE 'search%' THEN 1 END) AS searches,
+               COUNT(DISTINCT visitor_hash) AS visitors
+        FROM analytics_events
+        WHERE datetime(created_at) >= datetime('now', ?)
+        GROUP BY date(created_at)
+        ORDER BY day DESC
+        """,
+        (since_expr,),
+    ).fetchall()
+    total = conn.execute(
+        """
+        SELECT COUNT(CASE WHEN event_type = 'page_view' THEN 1 END) AS page_views,
+               COUNT(CASE WHEN event_type LIKE 'search%' THEN 1 END) AS searches,
+               COUNT(DISTINCT visitor_hash) AS visitors
+        FROM analytics_events
+        WHERE datetime(created_at) >= datetime('now', ?)
+        """,
+        (since_expr,),
+    ).fetchone()
+    top_paths = conn.execute(
+        """
+        SELECT path, COUNT(*) AS count
+        FROM analytics_events
+        WHERE event_type = 'page_view'
+          AND datetime(created_at) >= datetime('now', ?)
+        GROUP BY path
+        ORDER BY count DESC
+        LIMIT 10
+        """,
+        (since_expr,),
+    ).fetchall()
+    conn.close()
+    return {
+        "days": days,
+        "totals": {
+            "page_views": int(total["page_views"] or 0) if total else 0,
+            "searches": int(total["searches"] or 0) if total else 0,
+            "visitors": int(total["visitors"] or 0) if total else 0,
+        },
+        "events": [dict(row) for row in event_rows],
+        "daily": [dict(row) for row in daily_rows],
+        "top_paths": [dict(row) for row in top_paths],
+    }
 
 
 def normalize_status(start: Optional[str], end: Optional[str]) -> str:

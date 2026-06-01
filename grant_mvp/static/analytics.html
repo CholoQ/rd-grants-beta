@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>アクセス集計｜りこナビ</title>
+  <link rel="stylesheet" href="/style.css?v=20260601-deadline-status">
+</head>
+<body>
+  <main class="analytics-page">
+    <section class="analytics-panel">
+      <p class="brand-mark">りこナビ</p>
+      <h1>アクセス集計</h1>
+      <p class="analytics-note">管理用トークンを入れると、ページビュー・訪問者数・検索回数を見られます。</p>
+      <div class="analytics-controls">
+        <input id="adminToken" type="password" placeholder="ADMIN_TOKEN">
+        <select id="days">
+          <option value="7">直近7日</option>
+          <option value="30" selected>直近30日</option>
+          <option value="90">直近90日</option>
+        </select>
+        <button id="loadAnalytics" class="button button--primary">表示</button>
+      </div>
+      <p id="analyticsStatus" class="muted"></p>
+      <div id="analyticsSummary" class="analytics-grid"></div>
+      <div id="analyticsDaily" class="analytics-table"></div>
+    </section>
+  </main>
+  <script src="/analytics.js?v=20260601-analytics"></script>
+</body>
+</html>

@@ -8,7 +8,10 @@ from urllib.parse import parse_qs, urlparse
 from .config import ADMIN_TOKEN, HOST, PORT, STATIC_DIR, logger
 from .features import build_compare, build_grant_summary, build_readiness_check
 from .ranking import build_recommendation_response
-from .repository import bootstrap_data, create_lead, fetch_news, get_grant_by_id, get_meta, list_grants, list_leads, prepare_item
+from .repository import (
+    bootstrap_data, create_lead, fetch_news, get_analytics_summary, get_grant_by_id,
+    get_meta, list_grants, list_leads, log_analytics_event, prepare_item,
+)
 from .jgrants import refresh_data
 from .utils import utcnow
 from .rd_scheme import build_rd_meta, build_rd_search
@@ -75,6 +78,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 limit = int(params.get("limit", ["100"])[0])
                 lead_type = params.get("lead_type", [None])[0]
                 self._json({"items": list_leads(limit=limit, lead_type=lead_type)}); return
+            if parsed.path == "/api/analytics":
+                if not self._require_admin():
+                    return
+                params = parse_qs(parsed.query)
+                days = int(params.get("days", ["30"])[0])
+                self._json(get_analytics_summary(days)); return
             if parsed.path == "/api/legal":
                 from .config import LEGAL_DISCLAIMER
                 self._json(LEGAL_DISCLAIMER); return
@@ -105,6 +114,9 @@ class AppHandler(BaseHTTPRequestHandler):
             if self.path == "/api/lead":
                 body = self._read_body()
                 self._json(create_lead(body)); return
+            if self.path == "/api/track":
+                body = self._read_body()
+                self._json(log_analytics_event(body)); return
             if self.path == "/api/refresh":
                 if not self._require_admin():
                     return

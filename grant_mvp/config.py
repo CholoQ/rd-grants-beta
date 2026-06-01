@@ -254,4 +254,16 @@ CREATE TABLE IF NOT EXISTS leads (
 """
 
 
+ANALYTICS_EVENTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS analytics_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    path TEXT,
+    visitor_hash TEXT,
+    payload TEXT,
+    created_at TEXT NOT NULL
+)
+"""
+
+
 CONTRAST_MARKERS = ["ですが", "だが", "けれど", "けど", "ものの", "ただし", "一方で", "一方、", "ただ", "しかし"]
