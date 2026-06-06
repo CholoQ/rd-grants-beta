@@ -782,7 +782,6 @@ function showChatStep() {
   if (hint) hint.textContent = stepInputHint(step);
   input.placeholder = step.placeholder || '自由に入力...';
   $('#chatInput').hidden = false;
-  setTimeout(() => input.focus(), 50);
 }
 
 function advanceChatStep() {

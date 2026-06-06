@@ -23,9 +23,9 @@ from .config import JGRANTS_REQUEST_TIMEOUT, logger
 from .utils import strip_html, unique
 
 USER_AGENT = 'grant-mvp/detail-fetch'
-MAX_PDF_PAGES = 8
+MAX_PDF_PAGES = 20
 MAX_HTML_CHARS = 20000
-MAX_PDF_CHARS = 30000
+MAX_PDF_CHARS = 60000
 
 
 @lru_cache(maxsize=256)

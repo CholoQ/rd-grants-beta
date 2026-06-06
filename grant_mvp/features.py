@@ -11,7 +11,7 @@ from .gemini_summary import summarize_grant_with_gemini
 from .status_utils import effective_status
 from hashlib import sha256
 
-SUMMARY_CACHE_VERSION = "summary-v2"
+SUMMARY_CACHE_VERSION = "summary-v3-friendly"
 
 FUNDING_ALLOW_TERMS = [
     "補助金", "助成金", "委託", "委託費", "研究費", "支援", "公募", "募集", "提案募集",
@@ -132,6 +132,253 @@ def _summarize_text(text: str, limit: int = 110) -> str:
     if not plain:
         return '要確認'
     return plain[:limit] + ('…' if len(plain) > limit else '')
+
+
+def _clean_public_text(text: str, limit: int = 140) -> str:
+    plain = strip_html(text or "")
+    plain = re.sub(r"\s+", " ", plain).strip()
+    plain = re.sub(r"^[■●◆◇・\s]*(目的・概要|概要|趣旨|事業の目的|応募資格|対象者|補助内容|募集要項)[：:、\s]*", "", plain)
+    plain = plain.strip(" 。:：・")
+    if not plain:
+        return ""
+    if len(plain) > limit:
+        plain = plain[:limit].rstrip() + "…"
+    return plain
+
+
+def _split_clean_sentences(text: str) -> List[str]:
+    chunks = re.split(r"[。\n]", strip_html(text or ""))
+    out: List[str] = []
+    for chunk in chunks:
+        cleaned = _clean_public_text(chunk, 220)
+        if len(cleaned) < 8:
+            continue
+        if any(noise in cleaned for noise in ["目 次", "目次", "・・・・", "......", ".........."]):
+            continue
+        out.append(cleaned)
+    return unique(out)
+
+
+def _plain_hay(item: Dict, combined_text: str = "") -> str:
+    return " ".join([
+        str(item.get("title") or ""),
+        str(item.get("system_name") or ""),
+        str(item.get("institution_name") or ""),
+        str(item.get("industry") or ""),
+        str(item.get("use_purpose") or ""),
+        str(item.get("detail_plain") or ""),
+        str(combined_text or ""),
+    ]).lower()
+
+
+def _friendly_region(item: Dict, text: str) -> str:
+    region = (item.get("target_area_search") or "").strip()
+    if region and region not in {"全国", "日本全国", "国内全域"}:
+        return region
+    if "北海道" in text or "道内" in text:
+        return "北海道"
+    city_match = re.search(r"([一-龥ぁ-んァ-ヶ]+市)(?:内|に所在|に本社|の事業者)", text)
+    if city_match:
+        return city_match.group(1)
+    pref_match = re.search(r"([一-龥ぁ-んァ-ヶ]+(?:都|道|府|県))(?:内|に所在|に本社|の事業者)", text)
+    if pref_match:
+        return pref_match.group(1)
+    return region or ""
+
+
+def _friendly_applicant_phrase(item: Dict, combined_text: str) -> str:
+    text = _plain_hay(item, combined_text)
+    region = _friendly_region(item, text)
+    region_prefix = f"{region}の" if region and region not in {"全国", "日本全国", "国内全域"} else ""
+    if "大学発" in text or "大学等発" in text or "大学等発スタートアップ" in text:
+        return f"{region_prefix}大学発スタートアップや研究成果を事業化するチーム"
+    if "研究開発型スタートアップ" in text or "スタートアップ" in text:
+        return f"{region_prefix}研究開発型スタートアップ"
+    if "中小企業" in text and "小規模事業者" in text:
+        return f"{region_prefix}中小企業・小規模事業者など"
+    if "中小企業者" in text:
+        return f"{region_prefix}中小企業者など"
+    if "大学" in text and ("研究機関" in text or "研究者" in text):
+        return f"{region_prefix}大学・研究機関など"
+    if "事業者" in text:
+        return f"{region_prefix}事業者"
+    return f"{region_prefix}応募条件に合う事業者"
+
+
+def _friendly_use_phrase(item: Dict, combined_text: str) -> str:
+    text = _plain_hay(item, combined_text)
+    if any(k in text for k in ["海外出願", "外国出願"]):
+        return "国内で出願済みの特許・商標などを海外にも出願する費用"
+    if any(k in text for k in ["gapファンド", "ギャップファンド"]):
+        return "研究成果を事業化へ進めるための検証・試作・市場確認"
+    if any(k in text for k in ["アクセラ", "アクセラレーター", "共創", "協業", "活動資金"]):
+        return "実証先探し、伴走支援、PoCや事業化準備"
+    if any(k in text for k in ["実証", "poc", "概念実証", "フィールド"]):
+        return "PoCや実証実験、社会実装前の検証"
+    if any(k in text for k in ["試作", "プロトタイプ", "革新的サービス開発", "新商品", "新製品"]):
+        return "新しいサービス・試作品の開発"
+    if any(k in text for k in ["生産プロセス", "設備投資", "設備", "装置", "機器"]):
+        return "生産性向上や開発に必要な設備投資"
+    if any(k in text for k in ["販路", "展示会", "海外展開"]):
+        return "販路開拓や海外展開の準備"
+    if any(k in text for k in ["研究開発", "開発"]):
+        return "研究開発や追加開発"
+    return "事業化に向けた取り組み"
+
+
+def _friendly_budget_tail(item: Dict, combined_text: str) -> str:
+    max_limit = item.get("subsidy_max_limit")
+    bits: List[str] = []
+    if isinstance(max_limit, (int, float)) and max_limit > 0:
+        if max_limit >= 100_000_000:
+            bits.append(f"上限は約{max_limit / 100_000_000:g}億円")
+        elif max_limit >= 10_000:
+            bits.append(f"上限は約{int(max_limit / 10_000):,}万円")
+        else:
+            bits.append(f"上限は{int(max_limit):,}円")
+    rate = item.get("subsidy_rate")
+    if rate:
+        bits.append(f"補助率は{rate}")
+    if bits:
+        return "（" + "、".join(bits[:2]) + "）"
+    budget = extract_budget_text(combined_text, item.get("subsidy_rate"), item.get("subsidy_max_limit"))
+    if budget and budget != "要確認":
+        return f"（金額目安: {_clean_public_text(budget, 60)}）"
+    return ""
+
+
+def _friendly_overview(item: Dict, combined_text: str) -> str:
+    applicant = _friendly_applicant_phrase(item, combined_text)
+    use = _friendly_use_phrase(item, combined_text)
+    kind = funding_type_label(item.get("title") or "", combined_text)
+    tail = _friendly_budget_tail(item, combined_text)
+    return f"{applicant}が、{use}に使える{kind}です{tail}。"
+
+
+def _friendly_purpose(item: Dict, combined_text: str) -> str:
+    text = _plain_hay(item, combined_text)
+    if any(k in text for k in ["ものづくり", "革新的サービス開発", "生産プロセス"]):
+        return "新しい製品・サービスづくりや生産性向上の投資を後押しする制度です。"
+    if any(k in text for k in ["海外出願", "外国出願"]):
+        return "国内で守っている知財を海外展開にも使えるよう、出願費用の負担を軽くする制度です。"
+    if any(k in text for k in ["フードテック", "食品", "食料"]):
+        return "食品・フードテックの技術を、実証や事業化に近づけるための制度です。"
+    if any(k in text for k in ["gapファンド", "ギャップファンド", "大学発"]):
+        return "研究成果を事業化に近づけるため、PoC・試作・顧客検証の最初の資金を支える制度です。"
+    if any(k in text for k in ["アクセラ", "共創", "協業"]):
+        return "資金だけでなく、実証先や伴走支援も含めて事業化の前進を助ける制度です。"
+    if any(k in text for k in ["実証", "poc", "概念実証", "社会実装"]):
+        return "机上の研究や試作を、実際の現場で確かめる段階へ進める制度です。"
+    for key in ["目的", "趣旨", "概要", "事業概要", "狙い"]:
+        hit = next((s for s in _split_clean_sentences(combined_text) if key in s), "")
+        if hit and "参照" not in hit and not _looks_like_raw_excerpt(hit):
+            return _clean_public_text(hit, 120)
+    return _infer_purpose(item)
+
+
+def _friendly_target_conditions(item: Dict, combined_text: str) -> List[str]:
+    text = _plain_hay(item, combined_text)
+    out: List[str] = []
+
+    def add(label: str) -> None:
+        cleaned = _clean_public_text(label, 90)
+        if not cleaned:
+            return
+        vague = ["別添", "募集要項をご参照", "ご参照ください", "詳細は", "書類一式"]
+        if any(v in cleaned for v in vague):
+            return
+        if cleaned not in out:
+            out.append(cleaned)
+
+    if "日本国内に本社及び補助事業の実施場所" in text:
+        add("日本国内に本社と実施場所がある中小企業者・NPO・社会福祉法人")
+    elif "道内の中小企業" in text or "北海道内の中小企業" in text:
+        add("北海道内の中小企業者など")
+    elif "道内に事業所を有する中小企業" in text:
+        add("北海道内に事業所がある中小企業者または中小企業グループ")
+    elif "中小企業" in text and "小規模事業者" in text:
+        add("中小企業・小規模事業者など")
+    elif "中小企業者" in text:
+        add("中小企業者など")
+    elif "大学発" in text or "大学等発" in text:
+        add("大学・研究機関の研究成果をもとにしたスタートアップや事業化チーム")
+    elif "スタートアップ" in text:
+        add("スタートアップ、またはスタートアップと連携する事業者")
+
+    if not out:
+        for sentence in _split_clean_sentences(combined_text):
+            if len(out) >= 2:
+                break
+            if any(k in sentence for k in ["応募資格", "補助対象者", "対象者", "応募対象", "対象となる事業者"]):
+                if any(noise in sentence for noise in ["次の①", "第１号", "第1号", "規定する", "別紙", "様式"]):
+                    continue
+                add(sentence)
+
+    employees = (item.get("target_number_of_employees") or "").strip()
+    if employees and not any(k in employees for k in ("制限なし", "制約なし", "なし", "全規模", "問わない", "指定なし")):
+        add(f"従業員数: {employees}")
+
+    region = (item.get("target_area_search") or "").strip()
+    if region:
+        add(f"対象地域: {region}")
+
+    industry = (item.get("industry") or "").strip()
+    if industry:
+        industries = [x.strip() for x in re.split(r"[/／,、]", industry) if x.strip()]
+        if len(industries) >= 6:
+            add("業種: 幅広い業種が対象。自社業種が含まれるかだけ確認")
+        else:
+            add(f"業種: {'、'.join(industries[:4])}")
+
+    if not out:
+        out.append("対象者の記載が読み取りづらいです。所在地・法人種別・企業単独応募の可否を先に確認してください")
+    return out[:5]
+
+
+def _friendly_suitable_for(item: Dict, combined_text: str) -> List[str]:
+    applicant = _friendly_applicant_phrase(item, combined_text)
+    use = _friendly_use_phrase(item, combined_text)
+    first = f"{use}に使いたい{applicant}" if use.endswith("費用") else f"{use}を進めたい{applicant}"
+    out = [first]
+    text = _plain_hay(item, combined_text)
+    region = _friendly_region(item, text)
+    if region and region not in {"全国", "日本全国", "国内全域"}:
+        out.append(f"{region}に拠点または実施場所がある会社")
+    if any(k in text for k in ["見積", "設備", "装置", "外注"]):
+        out.append("見積や仕様を具体化できている会社")
+    if any(k in text for k in ["共同", "連携", "大学", "研究機関"]):
+        out.append("共同研究先や連携先を説明できる会社")
+    return unique(out)[:4]
+
+
+def _friendly_not_suitable_for(item: Dict, combined_text: str) -> List[str]:
+    out: List[str] = []
+    if effective_status(item) == "closed":
+        out.append("今回の締切に間に合わない会社")
+    text = _plain_hay(item, combined_text)
+    region = _friendly_region(item, text)
+    if region and region not in {"全国", "日本全国", "国内全域"}:
+        out.append(f"{region}に拠点・実施場所がない会社")
+    if any(k in text for k in ["海外出願", "外国出願"]):
+        out.append("まだ国内出願をしていない知財で使いたい会社")
+    if any(k in text for k in ["設備投資", "設備", "装置"]) and not any(k in text for k in ["人件費", "研究員"]):
+        out.append("人件費だけを主な用途にしたい会社")
+    if any(k in text for k in ["大学発", "大学等発"]) and "企業単独" not in text:
+        out.append("大学・研究機関との関係を説明できない会社")
+    return out[:4] or ["対象条件が細かいため、所在地・法人種別・使いたい費用が合わない会社"]
+
+
+def _looks_like_raw_excerpt(value: object) -> bool:
+    text = " ".join(value) if isinstance(value, list) else str(value or "")
+    if not text or text == "要確認":
+        return False
+    raw_markers = [
+        "■", "目 次", "目次", "・・・・", "..........", "ご参照ください", "別添の募集要項",
+        "font-size", "<p", "</", "第１章", "第1章",
+    ]
+    if any(marker in text for marker in raw_markers):
+        return True
+    return len(text) > 180 and any(k in text for k in ["目的", "概要", "応募資格", "補助率", "補助対象"])
 
 
 def _infer_field(item: Dict) -> str:
@@ -443,17 +690,9 @@ def build_grant_summary(grant_id: str) -> Dict:
             upsert_grant_summary_cache(str(item.get("id") or ""), fixed_ai_summary, source_text_hash, GEMINI_MODEL)
             summary_source = "gemini"
 
-    overview = _summarize_text(bundle.get("html_text") or bundle.get("pdf_text") or item.get("detail_plain") or item.get("subsidy_catch_phrase") or item.get("use_purpose") or "", 180)
-    purpose_candidates = []
-    for key in ["目的", "趣旨", "概要", "事業概要", "狙い", "支援"]:
-        purpose_candidates.extend([x for x in re.split(r'[。\n]', combined_text) if key in x][:1])
-    purpose = _summarize_text(' / '.join(purpose_candidates) or _infer_purpose(item), 150)
-
-    target_sentences = []
-    for key in ["対象", "応募資格", "対象者", "提案者", "応募できる", "応募対象"]:
-        target_sentences.extend([x for x in re.split(r'[。\n]', combined_text) if key in x][:2])
-    target_conditions = unique(_text_list(*(target_sentences[:3] + [item.get("target_number_of_employees"), item.get("target_area_search"), item.get("industry")]))) or ["要確認"]
-    target_conditions = target_conditions[:4]
+    overview = _friendly_overview(item, combined_text)
+    purpose = _friendly_purpose(item, combined_text)
+    target_conditions = _friendly_target_conditions(item, combined_text)
 
     expenses = _infer_expenses({**item, 'detail': combined_text, 'use_purpose': combined_text})
     document_candidates = _infer_documents({**item, 'detail': combined_text, 'use_purpose': combined_text})
@@ -479,7 +718,9 @@ def build_grant_summary(grant_id: str) -> Dict:
 
     def ai_value(key: str, fallback):
         if fixed_ai_summary and _looks_meaningful(fixed_ai_summary.get(key)):
-            return fixed_ai_summary.get(key)
+            value = fixed_ai_summary.get(key)
+            if not _looks_like_raw_excerpt(value):
+                return value
         return fallback
 
     final_cautions = _meaningful_list(ai_value('cautions', unique(cautions)), unique(cautions) or ["締切、対象経費、事前着手の扱いを先に確認してください"])
@@ -502,8 +743,8 @@ def build_grant_summary(grant_id: str) -> Dict:
         "application_steps": _meaningful_list(ai_value('preparation_tasks', []), ["対象地域・応募資格を確認する", "研究開発計画と経費明細を作る", "見積書・決算書など添付書類をそろえる", "締切の数日前までに電子申請を完了する"]),
         "cautions": final_cautions,
         "common_misses": ["地域要件の見落とし", "締切日の取り違え", "必要書類の不足", "研究フェーズと制度のずれ"],
-        "suitable_for": ai_value('suitable_for', ["要確認"]),
-        "not_suitable_for": ai_value('not_suitable_for', ["要確認"]),
+        "suitable_for": ai_value('suitable_for', _friendly_suitable_for(item, combined_text)),
+        "not_suitable_for": ai_value('not_suitable_for', _friendly_not_suitable_for(item, combined_text)),
         "rd_phase": ai_value('rd_phase', "unknown"),
         "expert_type_needed": ai_value('expert_type_needed', ["要確認"]),
         "first_questions_to_ask": _meaningful_list(ai_value('first_questions_to_ask', []), ["自社の所在地・業種・規模は対象に入るか", "人件費・外注費・設備費のうち使いたい費用は対象か", "交付決定前に発注・契約していないか", "締切までにGビズIDや添付書類がそろうか"]),

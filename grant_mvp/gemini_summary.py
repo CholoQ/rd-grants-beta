@@ -172,7 +172,64 @@ def normalize_gemini_summary(data: Dict[str, Any]) -> Dict[str, Any]:
     return {key: normalized.get(key, ["要確認"] if key in ARRAY_KEYS else "要確認") for key in SUMMARY_KEYS}
 
 
+def build_focused_source_text(source_text: str, limit: int = 24000) -> str:
+    """Keep the beginning plus decision-critical excerpts from long guidelines."""
+    clean = re.sub(r"\s+", " ", source_text or "").strip()
+    if len(clean) <= limit:
+        return clean
+
+    keywords = [
+        "目的", "概要", "応募資格", "対象者", "補助対象者", "申請者", "提案者",
+        "補助対象経費", "対象経費", "助成対象経費", "対象外経費", "補助率", "補助上限",
+        "助成上限", "公募期間", "締切", "提出期限", "必要書類", "提出書類", "添付書類",
+        "申請書", "事業計画", "経費明細", "見積", "決算", "GビズID", "審査", "採択",
+    ]
+    sentences = re.split(r"(?<=[。])|[\n\r]+", clean)
+    focused: List[str] = []
+    seen: set[str] = set()
+    for sentence in sentences:
+        item = sentence.strip(" 　・-")
+        if len(item) < 12:
+            continue
+        if not any(k in item for k in keywords):
+            continue
+        item = item[:240]
+        if item in seen:
+            continue
+        seen.add(item)
+        focused.append(item)
+        if len(" ".join(focused)) >= 11000:
+            break
+
+    for keyword in keywords:
+        if len(" ".join(focused)) >= 13000:
+            break
+        start = 0
+        while True:
+            pos = clean.find(keyword, start)
+            if pos < 0:
+                break
+            item = clean[max(0, pos - 80):pos + 280].strip(" 　・-")
+            item = item[:260]
+            start = pos + len(keyword)
+            if len(item) < 12 or item in seen:
+                continue
+            seen.add(item)
+            focused.append(item)
+            break
+
+    head = clean[:9000]
+    tail = clean[-2500:] if len(clean) > 18000 else ""
+    parts = [head]
+    if focused:
+        parts.append("応募判断に関係しそうな抜粋: " + " / ".join(focused))
+    if tail:
+        parts.append("文末付近の情報: " + tail)
+    return "\n\n".join(parts)[:limit]
+
+
 def build_gemini_summary_prompt(source_text: str, title: str = "") -> str:
+    focused_source = build_focused_source_text(source_text)
     return f"""
 あなたは日本の研究開発資金公募を読むアナリストです。
 以下の公募情報を、研究開発型企業が応募判断しやすいJSONに整理してください。
@@ -184,6 +241,11 @@ def build_gemini_summary_prompt(source_text: str, title: str = "") -> str:
 - 採択可能性は断定しない
 - 単なる要約ではなく、公募要領を読む前の一次判断に使える形にする
 - 研究開発型スタートアップ、大学発ベンチャー、技術系中小企業が理解しやすい表現にする
+- 原文の文章をそのまま短縮しない。行政文を「誰が、何をするために、何円くらい使えるのか」に翻訳する
+- overview は「誰向けの、何に使えるお金か」が一読で分かる1文にする
+- purpose は制度の目的をやさしい日本語に言い換える。目次・章見出し・制度変更の羅列を入れない
+- target_companies は「誰が応募できる？」への答えにする。対象地域、法人種別、企業単独応募の可否、従業員条件を分けて書く
+- target_companies で「募集要項を参照」「対象者は別添参照」のような表現は禁止。分からない場合は「企業単独応募の可否を確認」など確認点に分解する
 - suitable_for には、この公募が向いている企業像を入れる
 - not_suitable_for には、この公募が重すぎる/合わない可能性がある企業像を入れる
 - preparation_tasks には、応募前に準備すべき実務タスクを入れる
@@ -198,13 +260,14 @@ def build_gemini_summary_prompt(source_text: str, title: str = "") -> str:
 - 各リスト項目は60文字以内の体言止めで書く
 - 難しい行政用語は避け、初めて補助金を読む人にも伝わる言葉を選ぶ
 - 短くするために制度の対象・条件・金額などの重要情報を削らない
+- 「要確認」を使う場合も、何を確認するのかが分かる表現にする
 
-制度名:
-{title or '要確認'}
+	制度名:
+	{title or '要確認'}
 
-公募本文:
-{(source_text or '')[:18000]}
-""".strip()
+	公募本文:
+	{focused_source}
+	""".strip()
 
 
 def summarize_grant_with_gemini(source_text: str, title: str = "", timeout: int = 45) -> Optional[Dict[str, Any]]:
